@@ -26,7 +26,7 @@ import os
 import sys
 import argparse
 
-__version__ = '0.9.0'
+__version__ = '0.0.1'
 
 def main(cliargs):
     parser = argparse.ArgumentParser(
