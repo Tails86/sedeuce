@@ -1,0 +1,2 @@
+include refind.toml
+include *.md
