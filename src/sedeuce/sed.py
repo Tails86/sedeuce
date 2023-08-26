@@ -486,6 +486,7 @@ class Sed:
             if not condition or len(substr_line) == 0:
                 # TODO: be more specific
                 raise ValueError(f'Error at expression #{i+1}, char {substr_line.start_pos}')
+            substr_line.lstrip_self()
             command_type = SED_COMMANDS.get(substr_line[0], None)
             if command_type is None:
                 raise ValueError(f'Invalid command: {substr_line[0]}')
