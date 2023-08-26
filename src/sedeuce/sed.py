@@ -27,12 +27,16 @@ import sys
 import argparse
 import re
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 PACKAGE_NAME = 'sedeuce'
 
 WHITESPACE_CHARS = (' \t\n\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
                     '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000')
 NUMBER_CHARS = '0123456789'
+
+class SedParsingException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
 
 def _pattern_escape_invert(pattern, chars):
     for char in chars:
@@ -156,7 +160,7 @@ class SubString:
         return self._s[val]
 
     def __str__(self) -> str:
-        self._s[self.slice]
+        return self._s[self.slice]
 
     def __len__(self) -> int:
         len = self.abs_stop_pos - self.abs_start_pos
@@ -350,13 +354,11 @@ class RangeSedCondition(SedCondition):
                     second_num = int(s.base_str[pos:s.start_pos])
                     return RangeSedCondition(first_num, second_num)
                 else:
-                    # TODO: Report error
-                    return None
+                    raise SedParsingException('unexpected `,\'')
             else:
                 return RangeSedCondition(first_num)
         else:
-            # TODO: Report error
-            return None
+            raise SedParsingException('Not a range sequence')
 
 
 class RegexSedCondition(SedCondition):
@@ -381,11 +383,9 @@ class RegexSedCondition(SedCondition):
                 s.advance_start(1)
                 return condition
             else:
-                # TODO: Report error
-                return None
+                raise SedParsingException('unterminated address regex')
         else:
-            # TODO: Report error
-            return None
+            raise SedParsingException('Not a regex sequence')
 
 class SedCommand:
     def __init__(self, condition:SedCondition) -> None:
@@ -430,27 +430,29 @@ class Substitute(SedCommand):
             pos = s.start_pos
             s.advance_start_until(splitter)
             if len(s) == 0:
-                # TODO: Report error
-                return None
+                raise SedParsingException('unterminated `s\' command')
             find_pattern = s.base_str[pos:s.start_pos]
             s.advance_start(1)
             pos = s.start_pos
             s.advance_start_until(splitter)
             if len(s) == 0:
-                # TODO: Report error
-                return None
+                raise SedParsingException('unterminated `s\' command')
             replace_pattern = s.base_str[pos:s.start_pos]
             s.advance_start(1)
             # TODO: for now, only 'g' is supported
+            s.strip_self()
             if len(s) == 0:
-                return None
-            if s[0] != 'g':
-                return None
+                raise SedParsingException('Global `g\' currently required for `s\' command')
+            elif s[0] == 'g':
+                s.advance_start(1)
+                s.lstrip_self()
+            if len(s) > 0:
+                others = str(s).replace('g', '').strip()
+                raise SedParsingException(f'No flags besides `g\' are currently supported for `s\' command: {others}')
             s.advance_start(1)
             return Substitute(condition, find_pattern, replace_pattern)
         else:
-            # TODO: Report error
-            return None
+            raise SedParsingException('Not a substitute sequence')
 
 SED_COMMANDS = {
     Substitute.COMMAND_CHAR: Substitute
@@ -475,27 +477,27 @@ class Sed:
             substr_line.strip_self()
             c = substr_line[0]
             condition = StaticSedCondition(True)
-            if c in NUMBER_CHARS:
-                # Range condition
-                condition = RangeSedCondition.from_string(substr_line)
-            elif c == '/':
-                # Regex condition
-                condition = RegexSedCondition.from_string(substr_line)
-            else:
-                condition = StaticSedCondition(True)
-            if not condition or len(substr_line) == 0:
-                # TODO: be more specific
-                raise ValueError(f'Error at expression #{i+1}, char {substr_line.start_pos}')
-            substr_line.lstrip_self()
-            command_type = SED_COMMANDS.get(substr_line[0], None)
-            if command_type is None:
-                raise ValueError(f'Invalid command: {substr_line[0]}')
-            command = command_type.from_string(condition, substr_line)
-            substr_line.strip_self()
-            if not command or len(substr_line) != 0:
-                # TODO: be more specific
-                raise ValueError(f'Error at expression #{i+1}, char {substr_line.start_pos}')
-            self._commands.append(command)
+            try:
+                if c in NUMBER_CHARS:
+                    # Range condition
+                    condition = RangeSedCondition.from_string(substr_line)
+                elif c == '/':
+                    # Regex condition
+                    condition = RegexSedCondition.from_string(substr_line)
+                else:
+                    condition = StaticSedCondition(True)
+                substr_line.lstrip_self()
+                if len(substr_line) != 0:
+                    command_type = SED_COMMANDS.get(substr_line[0], None)
+                    if command_type is None:
+                        raise SedParsingException(f'Invalid command: {substr_line[0]}')
+                    command = command_type.from_string(condition, substr_line)
+                    substr_line.strip_self()
+                    if len(substr_line) != 0:
+                        raise SedParsingException(f'unhandled: {substr_line}')
+                    self._commands.append(command)
+            except SedParsingException as ex:
+                raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.start_pos+1}: {ex}')
 
     def add_command(self, command_or_commands):
         if isinstance(command_or_commands, list):
@@ -573,6 +575,7 @@ def parse_args(cliargs):
     #                     help='separate lines by NUL characters')
     parser.add_argument('--version', action='store_true',
                         help='output version information and exit')
+    parser.add_argument('--verbose', action='store_true', help='show verbose errors')
     args = parser.parse_args(cliargs)
     return args
 
@@ -585,7 +588,13 @@ def main(cliargs):
         print('No script provided')
         return 1
     sed = Sed()
-    sed.add_script(args.script)
-    if args.input_file:
-        sed.add_file(args.input_file)
-    sed.execute()
+    try:
+        sed.add_script(args.script)
+        if args.input_file:
+            sed.add_file(args.input_file)
+            sed.execute()
+    except Exception as ex:
+        if args.verbose:
+            raise ex
+        else:
+            print(f'{PACKAGE_NAME}: {ex}', file=sys.stderr)
