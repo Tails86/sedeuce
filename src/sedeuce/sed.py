@@ -34,6 +34,16 @@ WHITESPACE_CHARS = (' \t\n\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004
                     '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000')
 NUMBER_CHARS = '0123456789'
 
+def _pattern_escape_invert(pattern, chars):
+    for char in chars:
+        escaped_char = '\\' + char
+        pattern_split = pattern.split(escaped_char)
+        new_pattern_split = []
+        for piece in pattern_split:
+            new_pattern_split.append(piece.replace(char, escaped_char))
+        pattern = char.join(new_pattern_split)
+    return pattern
+
 class SubString:
     ''' Handles substring without modifying the original, instead keeping track of position '''
     def __init__(self, s='', start_pos=0, stop_pos=None):
@@ -352,7 +362,7 @@ class RangeSedCondition(SedCondition):
 class RegexSedCondition(SedCondition):
     def __init__(self, pattern) -> None:
         super().__init__()
-        self._pattern = pattern
+        self._pattern = _pattern_escape_invert(pattern, '+?|{}()')
         if isinstance(self._pattern, str):
             self._pattern = self._pattern.encode()
 
@@ -395,10 +405,10 @@ class Substitute(SedCommand):
 
     def __init__(self, condition:SedCondition, find_pattern, replace_pattern):
         super().__init__(condition)
-        self._find = find_pattern
+        self._find = _pattern_escape_invert(find_pattern, '+?|{}()')
         if isinstance(self._find, str):
             self._find = self._find.encode()
-        self._replace = replace_pattern
+        self._replace = _pattern_escape_invert(replace_pattern, '+?|{}()')
         if isinstance(self._replace, str):
             self._replace = self._replace.encode()
 
