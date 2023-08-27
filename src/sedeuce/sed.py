@@ -444,7 +444,7 @@ class SedCommand:
     def _handle(self, dat:WorkingData) -> bool:
         return False
 
-class Substitute(SedCommand):
+class SubstituteCommand(SedCommand):
     COMMAND_CHAR = 's'
 
     def __init__(self, condition:SedCondition, find_pattern, replace_pattern):
@@ -564,7 +564,10 @@ class Substitute(SedCommand):
                 return False
 
     @staticmethod
-    def from_string(condition:SedCondition, s:SubString):
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = SubString(s)
+
         s.lstrip_self()
         if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
             splitter = s[1]
@@ -581,7 +584,7 @@ class Substitute(SedCommand):
                 raise SedParsingException('unterminated `s\' command')
             replace_pattern = s.base_str[pos:s.start_pos]
             s.advance_start(1)
-            command = Substitute(condition, find_pattern, replace_pattern)
+            command = SubstituteCommand(condition, find_pattern, replace_pattern)
             s.strip_self()
             while len(s) > 0:
                 c = s[0]
@@ -614,8 +617,51 @@ class Substitute(SedCommand):
         else:
             raise SedParsingException('Not a substitute sequence')
 
+class AppendCommand(SedCommand):
+    COMMAND_CHAR = 'a'
+
+    def __init__(self, condition: SedCondition, append_value):
+        super().__init__(condition)
+        if isinstance(append_value, str):
+            self._append_value = append_value.encode()
+        else:
+            self._append_value = append_value
+        self._newline_value = b'\n'
+
+    @property
+    def newline_value(self):
+        return self._newline_value
+
+    # TODO: set this when newline value is different from \n
+    @newline_value.setter
+    def newline_value(self, newline_value):
+        if isinstance(newline_value, str):
+            self._newline_value = newline_value.encode()
+        else:
+            self._newline_value = newline_value
+
+    def _handle(self, dat:WorkingData) -> bool:
+        dat.bytes += self._append_value + self._newline_value
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = SubString(s)
+
+        s.lstrip_self()
+        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
+            s.advance_start(1)
+            if len(s) > 0 and s[0] == '\\':
+                s.advance_start(1)
+            pos = s.start_pos
+            s.advance_start()
+            return AppendCommand(condition, s.base_str[pos:])
+        else:
+            raise SedParsingException('Not an append sequence')
+
 SED_COMMANDS = {
-    Substitute.COMMAND_CHAR: Substitute
+    SubstituteCommand.COMMAND_CHAR: SubstituteCommand,
+    AppendCommand.COMMAND_CHAR: AppendCommand
 }
 
 class Sed:
