@@ -26,6 +26,7 @@ import os
 import sys
 import argparse
 import re
+import subprocess
 
 __version__ = '0.0.2'
 PACKAGE_NAME = 'sedeuce'
@@ -392,13 +393,22 @@ class SedCommand:
         self._condition = condition
 
     def handle(self, dat:WorkingData) -> bool:
-        if self._condition.is_match(dat):
+        if self._condition is None or self._condition.is_match(dat):
             return self._handle(dat)
         else:
             return False
 
+    @staticmethod
+    def _print_bytes(b:bytes):
+        sys.stdout.buffer.write(b)
+        sys.stdout.buffer.flush()
+
     def _handle(self, dat:WorkingData) -> bool:
         return False
+
+# Holds all currently opened files
+# TODO: close files once they are no longer being used
+sed_files = {}
 
 class Substitute(SedCommand):
     COMMAND_CHAR = 's'
@@ -408,18 +418,85 @@ class Substitute(SedCommand):
         self._find = _pattern_escape_invert(find_pattern, '+?|{}()')
         if isinstance(self._find, str):
             self._find = self._find.encode()
-        self._replace = _pattern_escape_invert(replace_pattern, '+?|{}()')
+        self._find = re.compile(self._find)
+        self._replace = replace_pattern
         if isinstance(self._replace, str):
             self._replace = self._replace.encode()
 
+        self.global_replace = False
+        self.nth_match = None
+        self.print_matched_lines = False
+        self.matched_file = None
+        self.execute_replacement = False
+
+    def _match_made(self, dat:WorkingData):
+        if self.print_matched_lines:
+            self._print_bytes(dat.bytes)
+        if self.matched_file is not None:
+            self.matched_file.write(dat.bytes)
+            self.matched_file.flush()
+
     def _handle(self, dat:WorkingData) -> bool:
-        result = re.subn(self._find, self._replace, dat.bytes)
-        if result[1] > 0:
-            dat.bytes = result[0]
-            return True
+        if self.global_replace and not self.execute_replacement:
+            count = 0
         else:
-            # No changes
+            count = 1
+
+        if self.execute_replacement:
+            # This is a pain in the ass - manually go to each match in order to execute
+            match_idx = 0
+            offset = 0
+            match = re.search(self._find, dat.bytes)
+            matched = False
+            while match:
+                start = match.start(0) + offset
+                end = match.end(0) + offset
+                if self.nth_match is None or (match_idx + 1) >= self.nth_match:
+                    matched = True
+                    new_str = re.sub(self._find, self._replace, match.group(0))
+                    # Execute the replacement
+                    proc_output = subprocess.run(new_str.decode(), shell=True, capture_output=True)
+                    new_dat = proc_output.stdout
+                    if new_dat.endswith(b'\n'):
+                        new_dat = new_dat[:-1]
+                    if new_dat.endswith(b'\r'):
+                        new_dat = new_dat[:-1]
+                    dat.bytes = dat.bytes[0:start] + new_dat + dat.bytes[end:]
+                    offset = start + len(new_dat)
+                    match = re.search(self._find, dat.bytes[offset:])
+                    if self.nth_match is not None and not self.global_replace:
+                        # All done
+                        break
+                else:
+                    offset = end
+                    match = re.search(self._find, dat.bytes[offset:])
+                match_idx += 1
+            if matched:
+                self._match_made(dat)
+                return True
+        elif self.nth_match is not None:
+            matches = re.findall(self._find, dat.bytes)
+            if len(matches) < self.nth_match:
+                return False
+            for i,match in enumerate(re.finditer(self._find, dat.bytes)):
+                if (i + 1) >= self.nth_match:
+                    start = match.start(0)
+                    dat.bytes = (
+                        dat.bytes[0:start]
+                        + re.sub(self._find, self._replace, dat.bytes[start:], count)
+                    )
+                    self._match_made(dat)
+                    return True
             return False
+        else:
+            result = re.subn(self._find, self._replace, dat.bytes, count)
+            if result[1] > 0:
+                dat.bytes = result[0]
+                self._match_made(dat)
+                return True
+            else:
+                # No changes
+                return False
 
     @staticmethod
     def from_string(condition:SedCondition, s:SubString):
@@ -439,18 +516,35 @@ class Substitute(SedCommand):
                 raise SedParsingException('unterminated `s\' command')
             replace_pattern = s.base_str[pos:s.start_pos]
             s.advance_start(1)
-            # TODO: for now, only 'g' is supported
+            command = Substitute(condition, find_pattern, replace_pattern)
             s.strip_self()
-            if len(s) == 0:
-                raise SedParsingException('Global `g\' currently required for `s\' command')
-            elif s[0] == 'g':
+            while len(s) > 0:
+                c = s[0]
                 s.advance_start(1)
-                s.lstrip_self()
-            if len(s) > 0:
-                others = str(s).replace('g', '').strip()
-                raise SedParsingException(f'No flags besides `g\' are currently supported for `s\' command: {others}')
-            s.advance_start(1)
-            return Substitute(condition, find_pattern, replace_pattern)
+                if c in NUMBER_CHARS:
+                    pos = s.start_pos - 1
+                    s.lstrip_self(NUMBER_CHARS)
+                    command.nth_match = int(s.base_str[pos:s.start_pos])
+                elif c == 'g':
+                    command.global_replace = True
+                elif c == 'p':
+                    command.print_matched_lines = True
+                elif c == 'w':
+                    file_name = s.base_str[s.start_pos:].strip()
+                    s.advance_start() # Used the rest of the characters here
+                    if file_name == '/dev/stdout':
+                        command.matched_file = sys.stdout.buffer
+                    elif file_name == '/dev/stderr':
+                        command.matched_file = sys.stderr.buffer
+                    else:
+                        file_name = os.path.abspath(file_name)
+                        if file_name not in sed_files:
+                            sed_files[file_name] = open(file_name, 'wb')
+                        command.matched_file = sed_files[file_name]
+                elif c == 'e':
+                    command.execute_replacement = True
+                # else: ignore
+            return command
         else:
             raise SedParsingException('Not a substitute sequence')
 
@@ -534,7 +628,8 @@ class Sed:
                 for command in self._commands:
                     if command.handle(dat):
                         changed = True
-                print(dat.bytes.decode(), end='')
+                sys.stdout.buffer.write(dat.bytes)
+            sys.stdout.buffer.flush()
 
 def parse_args(cliargs):
     parser = argparse.ArgumentParser(
