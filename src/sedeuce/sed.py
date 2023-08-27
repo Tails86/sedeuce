@@ -27,8 +27,10 @@ import sys
 import argparse
 import re
 import subprocess
+import tempfile
+import shutil
 
-__version__ = '0.0.2'
+__version__ = '0.1.0'
 PACKAGE_NAME = 'sedeuce'
 
 WHITESPACE_CHARS = (' \t\n\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
@@ -592,6 +594,8 @@ class Sed:
         # TODO: support list within list when brackets are used
         self._commands = []
         self._files = []
+        self.in_place = False
+        self.in_place_backup_suffix = None
 
     def add_script(self, script:str):
         # TODO: Support brackets
@@ -654,22 +658,42 @@ class Sed:
 
         line_num = 0
         for file in files:
+            file_changed = False
+
+            if self.in_place and not isinstance(file, StdinIterable):
+                tmp_file = tempfile.NamedTemporaryFile(mode='wb')
+                out_file = tmp_file
+            else:
+                tmp_file = None
+                out_file = sys.stdout.buffer
+
             for line in file:
                 line_num += 1
                 dat = WorkingData()
                 dat.line_number = line_num
                 dat.bytes = line
-                changed = False
                 for command in self._commands:
                     if command.handle(dat):
-                        changed = True
-                sys.stdout.buffer.write(dat.bytes)
-                sys.stdout.buffer.flush()
+                        file_changed = True
+                out_file.write(dat.bytes)
+                out_file.flush()
+
+            if file_changed and tmp_file:
+                # Write data from temp file to destination
+                tmp_file.flush()
+                file_name = os.path.abspath(file.name)
+                if self.in_place_backup_suffix is not None:
+                    backup_name = file_name + self.in_place_backup_suffix
+                    shutil.copy2(file_name, backup_name)
+                os.remove(file_name)
+                shutil.copy2(tmp_file.name, file_name)
+                del tmp_file
 
 def parse_args(cliargs):
     parser = argparse.ArgumentParser(
         prog=PACKAGE_NAME,
-        description='A sed clone in Python with both CLI and library interfaces'
+        description='A sed clone in Python with both CLI and library interfaces',
+        epilog='NOTE: Only substitute command is currently available'
     )
 
     parser.add_argument('script', type=str, nargs='?',
@@ -686,8 +710,9 @@ def parse_args(cliargs):
     #                     help='add the contents of script-file to the commands to be executed')
     # parser.add_argument('--follow-symlinks', action='store_true',
     #                     help='follow symlinks when processing in place')
-    # parser.add_argument('-i', '--in-place', metavar='SUFFIX', nargs='?', type=str, default=None,
-    #                     help='edit files in place (makes backup if SUFFIX supplied)')
+    parser.add_argument('-i', '--in-place', metavar='SUFFIX', nargs='?', type=str, default=None,
+                        const=True,
+                        help='edit files in place (makes backup if SUFFIX supplied)')
     # parser.add_argument('-l', '--line-length', metavar='N', type=int, default=None,
     #                     help='specify the desired line-wrap length for the `l\' command')
     # parser.add_argument('--posix', action='store_true', help='disable all GNU extensions.')
@@ -722,6 +747,10 @@ def main(cliargs):
         sed.add_script(args.script)
         if args.input_file:
             sed.add_file(args.input_file)
+        if args.in_place is not None:
+            sed.in_place = True
+            if isinstance(args.in_place, str):
+                sed.in_place_backup_suffix = args.in_place
         sed.execute()
     except Exception as ex:
         if args.verbose:
