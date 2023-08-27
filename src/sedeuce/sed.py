@@ -30,7 +30,7 @@ import subprocess
 import tempfile
 import shutil
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 PACKAGE_NAME = 'sedeuce'
 
 WHITESPACE_CHARS = (' \t\n\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
