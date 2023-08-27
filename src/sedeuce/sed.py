@@ -415,10 +415,10 @@ class Substitute(SedCommand):
 
     def __init__(self, condition:SedCondition, find_pattern, replace_pattern):
         super().__init__(condition)
-        self._find = _pattern_escape_invert(find_pattern, '+?|{}()')
-        if isinstance(self._find, str):
-            self._find = self._find.encode()
-        self._find = re.compile(self._find)
+        find_pattern = _pattern_escape_invert(find_pattern, '+?|{}()')
+        if isinstance(find_pattern, str):
+            find_pattern = find_pattern.encode()
+        self._find_bytes = find_pattern
         self._replace = replace_pattern
         if isinstance(self._replace, str):
             self._replace = self._replace.encode()
@@ -428,6 +428,41 @@ class Substitute(SedCommand):
         self.print_matched_lines = False
         self.matched_file = None
         self.execute_replacement = False
+        self._ignore_case = False
+        # This gets a bit different implementation when used with global
+        # Since $ matches BOTH before and after newline, you may get 2 matches in that case
+        # That seems to be more true to the definition of what this means, so I'll allow it
+        self._multiline_mode = False
+
+        self._compile_find()
+
+    @property
+    def ignore_case(self):
+        return self._ignore_case
+
+    @ignore_case.setter
+    def ignore_case(self, ignore_case):
+        if self._ignore_case != ignore_case:
+            self._ignore_case = ignore_case
+            # Need to recompile find
+            self._compile_find()
+
+    @property
+    def multiline_mode(self):
+        return self._multiline_mode
+
+    @multiline_mode.setter
+    def multiline_mode(self, multiline_mode):
+        if self._multiline_mode != multiline_mode:
+            self._multiline_mode = multiline_mode
+            # Need to recompile find
+            self._compile_find()
+
+    def _compile_find(self):
+        flags = 0
+        if self._ignore_case:
+            flags |= re.IGNORECASE
+        self._find = re.compile(self._find_bytes, flags)
 
     def _match_made(self, dat:WorkingData):
         if self.print_matched_lines:
@@ -475,9 +510,6 @@ class Substitute(SedCommand):
                 self._match_made(dat)
                 return True
         elif self.nth_match is not None:
-            matches = re.findall(self._find, dat.bytes)
-            if len(matches) < self.nth_match:
-                return False
             for i,match in enumerate(re.finditer(self._find, dat.bytes)):
                 if (i + 1) >= self.nth_match:
                     start = match.start(0)
@@ -543,6 +575,10 @@ class Substitute(SedCommand):
                         command.matched_file = sed_files[file_name]
                 elif c == 'e':
                     command.execute_replacement = True
+                elif c == 'i' or c == 'I':
+                    command.ignore_case = True
+                elif c == 'm' or c == 'M':
+                    command.multiline_mode = True
                 # else: ignore
             return command
         else:
