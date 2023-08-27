@@ -419,6 +419,7 @@ class Substitute(SedCommand):
         if isinstance(find_pattern, str):
             find_pattern = find_pattern.encode()
         self._find_bytes = find_pattern
+        # TODO: implement special sequences?
         self._replace = replace_pattern
         if isinstance(self._replace, str):
             self._replace = self._replace.encode()
@@ -429,9 +430,7 @@ class Substitute(SedCommand):
         self.matched_file = None
         self.execute_replacement = False
         self._ignore_case = False
-        # This gets a bit different implementation when used with global
-        # Since $ matches BOTH before and after newline, you may get 2 matches in that case
-        # That seems to be more true to the definition of what this means, so I'll allow it
+        # This gives a bit different implementation within re
         self._multiline_mode = False
 
         self._compile_find()
@@ -665,7 +664,7 @@ class Sed:
                     if command.handle(dat):
                         changed = True
                 sys.stdout.buffer.write(dat.bytes)
-            sys.stdout.buffer.flush()
+                sys.stdout.buffer.flush()
 
 def parse_args(cliargs):
     parser = argparse.ArgumentParser(
@@ -723,7 +722,7 @@ def main(cliargs):
         sed.add_script(args.script)
         if args.input_file:
             sed.add_file(args.input_file)
-            sed.execute()
+        sed.execute()
     except Exception as ex:
         if args.verbose:
             raise ex
