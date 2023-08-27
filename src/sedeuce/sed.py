@@ -29,6 +29,7 @@ import re
 import subprocess
 import tempfile
 import shutil
+import threading
 
 __version__ = '0.1.1'
 PACKAGE_NAME = 'sedeuce'
@@ -313,6 +314,41 @@ class StdinIterable(FileIterable):
     def eof(self):
         return self._eof_detected
 
+class SharedFileWriter:
+    ''' Simple file writer used when multiple objects need to write to the same file '''
+    files = {}
+    files_mutex = threading.Semaphore(1)
+
+    def __init__(self, file_path, binary=True, append=False):
+        file_path = os.path.abspath(file_path)
+        self._file_path = file_path
+        with __class__.files_mutex:
+            if file_path not in __class__.files:
+                if append:
+                    mode = 'a'
+                else:
+                    mode = 'w'
+
+                if binary:
+                    mode += 'b'
+
+                __class__.files[file_path] = {
+                    'file': open(file_path, mode),
+                    'count': 0
+                }
+            self._file_entry = __class__.files[file_path]
+            self._file_entry['count'] += 1
+            self._file = self._file_entry['file']
+        self.write = self._file.write
+        self.flush = self._file.flush
+
+    def __del__(self):
+        with __class__.files_mutex:
+            __class__.files[self._file_path]['count'] -= 1
+            if __class__.files[self._file_path]['count'] <= 0:
+                del __class__.files[self._file_path]
+                self._file.close()
+
 class WorkingData:
     def __init__(self) -> None:
         self.line_number = 0
@@ -407,10 +443,6 @@ class SedCommand:
 
     def _handle(self, dat:WorkingData) -> bool:
         return False
-
-# Holds all currently opened files
-# TODO: close files once they are no longer being used
-sed_files = {}
 
 class Substitute(SedCommand):
     COMMAND_CHAR = 's'
@@ -570,10 +602,7 @@ class Substitute(SedCommand):
                     elif file_name == '/dev/stderr':
                         command.matched_file = sys.stderr.buffer
                     else:
-                        file_name = os.path.abspath(file_name)
-                        if file_name not in sed_files:
-                            sed_files[file_name] = open(file_name, 'wb')
-                        command.matched_file = sed_files[file_name]
+                        command.matched_file = SharedFileWriter(file_name, binary=True, append=False)
                 elif c == 'e':
                     command.execute_replacement = True
                 elif c == 'i' or c == 'I':
@@ -609,7 +638,6 @@ class Sed:
             substr_line = SubString(line)
             substr_line.strip_self()
             c = substr_line[0]
-            condition = StaticSedCondition(True)
             try:
                 if c in NUMBER_CHARS:
                     # Range condition
@@ -618,7 +646,7 @@ class Sed:
                     # Regex condition
                     condition = RegexSedCondition.from_string(substr_line)
                 else:
-                    condition = StaticSedCondition(True)
+                    condition = None
                 substr_line.lstrip_self()
                 if len(substr_line) != 0:
                     command_type = SED_COMMANDS.get(substr_line[0], None)
@@ -629,6 +657,8 @@ class Sed:
                     if len(substr_line) != 0:
                         raise SedParsingException(f'unhandled: {substr_line}')
                     self._commands.append(command)
+                elif condition is not None:
+                    raise SedParsingException('missing command')
             except SedParsingException as ex:
                 raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.start_pos+1}: {ex}')
 
