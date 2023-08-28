@@ -94,7 +94,7 @@ class StringParser:
         if inc is not None and inc > 0:
             self._pos += inc
 
-    def advance_while(self, characters=WHITESPACE_CHARS):
+    def advance_past(self, characters=WHITESPACE_CHARS):
         ''' Similar to lstrip - advances while current char is in characters
          Returns : True if pos now points to a character outside of characters
                    False if advanced to end of string '''
@@ -375,15 +375,15 @@ class RangeSedCondition(SedCondition):
 
     @staticmethod
     def from_string(s:StringParser):
-        if s.advance_while() and s[0] in NUMBER_CHARS:
+        if s.advance_past() and s[0] in NUMBER_CHARS:
             s.mark()
-            s.advance_while(NUMBER_CHARS)
+            s.advance_past(NUMBER_CHARS)
             first_num = int(s.str_from_mark())
             if len(s) > 0 and s[0] == ',':
                 s.advance(1)
                 if len(s) > 0 and s[0] in NUMBER_CHARS:
                     s.mark()
-                    s.advance_while(NUMBER_CHARS)
+                    s.advance_past(NUMBER_CHARS)
                     second_num = int(s.str_from_mark())
                     return RangeSedCondition(first_num, second_num)
                 else:
@@ -406,7 +406,7 @@ class RegexSedCondition(SedCondition):
 
     @staticmethod
     def from_string(s:StringParser):
-        if s.advance_while() and s[0] == '/':
+        if s.advance_past() and s[0] == '/':
             s.advance(1)
             s.mark()
             if s.advance_until('/'):
@@ -561,7 +561,7 @@ class SubstituteCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             splitter = s[1]
             s.advance(2)
             s.mark()
@@ -575,12 +575,12 @@ class SubstituteCommand(SedCommand):
             replace_pattern = s.str_from_mark()
             s.advance(1)
             command = SubstituteCommand(condition, find_pattern, replace_pattern)
-            while s.advance_while() and s[0] not in END_COMMAND_CHARS:
+            while s.advance_past() and s[0] not in END_COMMAND_CHARS:
                 c = s[0]
                 s.mark()
                 s.advance(1)
                 if c in NUMBER_CHARS:
-                    s.advance_while(NUMBER_CHARS)
+                    s.advance_past(NUMBER_CHARS)
                     command.nth_match = int(s.str_from_mark())
                 elif c == 'g':
                     command.global_replace = True
@@ -627,7 +627,7 @@ class AppendCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
             if len(s) > 0 and s[0] == '\\':
                 s.advance(1)
@@ -654,9 +654,9 @@ class BranchCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.advance_while()
+            s.advance_past()
             s.mark()
             s.advance_until(END_COMMAND_CHARS)
             branch_name = s.str_from_mark()
@@ -683,12 +683,12 @@ class ReplaceCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
             if len(s) > 0 and s[0] == '\\':
                 s.advance(1)
             else:
-                s.advance_while()
+                s.advance_past()
             s.mark()
             s.advance_until(END_COMMAND_CHARS)
             replace = s.str_from_mark()
@@ -712,9 +712,9 @@ class DeleteCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.advance_while()
+            s.advance_past()
             return DeleteCommand(condition)
         else:
             raise SedParsingException('Not a delete command')
@@ -740,9 +740,9 @@ class DeleteToNewlineCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.advance_while()
+            s.advance_past()
             return DeleteToNewlineCommand(condition)
         else:
             raise SedParsingException('Not a delete command')
@@ -759,9 +759,9 @@ class Label(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.advance_while()
+            s.advance_past()
             s.mark()
             s.advance_until(END_COMMAND_CHARS)
             label = s.str_from_mark()
@@ -809,7 +809,7 @@ class Sed:
         for i, line in enumerate(script_lines):
             substr_line = StringParser(line)
             while len(substr_line) > 0:
-                substr_line.advance_while()
+                substr_line.advance_past()
                 c = substr_line[0]
                 try:
                     if c in NUMBER_CHARS:
@@ -820,14 +820,14 @@ class Sed:
                         condition = RegexSedCondition.from_string(substr_line)
                     else:
                         condition = None
-                    if substr_line.advance_while() and substr_line[0] not in END_COMMAND_CHARS:
+                    if substr_line.advance_past() and substr_line[0] not in END_COMMAND_CHARS:
                         command_type = SED_COMMANDS.get(substr_line[0], None)
                         if command_type is None:
                             raise SedParsingException(f'Invalid command: {substr_line[0]}')
                         command = command_type.from_string(condition, substr_line)
-                        if substr_line.advance_while() and substr_line[0] not in END_COMMAND_CHARS:
+                        if substr_line.advance_past() and substr_line[0] not in END_COMMAND_CHARS:
                             raise SedParsingException(f'extra characters after command')
-                        substr_line.advance_while(WHITESPACE_CHARS + END_COMMAND_CHARS)
+                        substr_line.advance_past(WHITESPACE_CHARS + END_COMMAND_CHARS)
                         self._commands.append(command)
                     elif condition is not None:
                         raise SedParsingException('missing command')
