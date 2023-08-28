@@ -37,6 +37,7 @@ PACKAGE_NAME = 'sedeuce'
 WHITESPACE_CHARS = (' \t\n\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
                     '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000')
 NUMBER_CHARS = '0123456789'
+END_COMMAND_CHARS = '\n;'
 
 class SedParsingException(Exception):
     def __init__(self, *args: object) -> None:
@@ -52,18 +53,22 @@ def _pattern_escape_invert(pattern, chars):
         pattern = char.join(new_pattern_split)
     return pattern
 
-class SubString:
-    ''' Handles substring without modifying the original, instead keeping track of position '''
-    def __init__(self, s='', start_pos=0, stop_pos=None):
-        self.set(s, start_pos, stop_pos)
+class StringParser:
+    ''' Contains a string and an advancing position pointer '''
 
-    def set(self, s='', start_pos=0, stop_pos=None):
+    def __init__(self, s='', pos=0):
+        self.set(s, pos)
+        self.mark()
+
+    def set(self, s='', pos=0):
         self._s = s
-        self.adjust_pos(start_pos, stop_pos)
+        if pos is None or pos < 0:
+            self._pos = 0
+        else:
+            self._pos = pos
 
-    def adjust_pos(self, start_pos=0, stop_pos=None):
-        self._start_pos = start_pos
-        self._stop_pos = stop_pos
+    def mark(self):
+        self._mark = self._pos
 
     @property
     def base_str(self):
@@ -74,84 +79,45 @@ class SubString:
         self._s = s
 
     @property
-    def slice(self):
-        return slice(self.start_pos, self.stop_pos)
-
-    @property
-    def start_pos(self):
-        if self._start_pos is None or self._start_pos < 0:
+    def pos(self):
+        if self._pos is None or self._pos < 0:
             return 0
         else:
-            return self._start_pos
+            return self._pos
 
-    @property
-    def abs_start_pos(self):
-        start_pos = self.start_pos
-        if start_pos is None:
-            return 0
-        else:
-            return start_pos
+    @pos.setter
+    def pos(self, pos):
+        self._pos = pos
 
-    @start_pos.setter
-    def start_pos(self, pos):
-        self._start_pos = pos
+    def advance(self, inc):
+        ''' Advances a set number of characters '''
+        if inc is not None and inc > 0:
+            self._pos += inc
 
-    @property
-    def stop_pos(self):
-        if self._stop_pos is not None and self._stop_pos > len(self._s):
-            return len(self._s)
-        else:
-            return self._stop_pos
-
-    @property
-    def abs_stop_pos(self):
-        stop_pos = self.stop_pos
-        if stop_pos is None:
-            return len(self._s)
-        else:
-            return stop_pos
-
-    @stop_pos.setter
-    def stop_pos(self, pos):
-        self._stop_pos = pos
-
-    def advance_start(self, inc=None):
-        if inc is None:
-            # Advance to end
-            self._start_pos = len(self._s)
-        else:
-            self._start_pos += inc
-
-    def advance_end(self, inc):
-        self._stop_pos += inc
-
-    def lstrip_self(self, characters=WHITESPACE_CHARS):
-        for i in range(self.abs_start_pos, self.abs_stop_pos):
+    def advance_while(self, characters=WHITESPACE_CHARS):
+        ''' Similar to lstrip - advances while current char is in characters
+         Returns : True if pos now points to a character outside of characters
+                   False if advanced to end of string '''
+        for i in range(self._pos, len(self._s)):
             if self._s[i] not in characters:
-                self._start_pos = i
-                return
-        self._start_pos = len(self._s)
+                self._pos = i
+                return True
+        self._pos = len(self._s)
+        return False
 
-    def advance_start_until(self, characters=WHITESPACE_CHARS):
-        for i in range(self.abs_start_pos, self.abs_stop_pos):
+    def advance_until(self, characters=WHITESPACE_CHARS):
+        ''' Advances until current char is in characters
+         Returns : True if pos now points to a character within characters
+                   False if advanced to end of string '''
+        for i in range(self._pos, len(self._s)):
             if self._s[i] in characters:
-                self._start_pos = i
-                return
-        self._start_pos = len(self._s)
-
-    def rstrip_self(self, characters=WHITESPACE_CHARS):
-        for i in range(self.abs_stop_pos - 1, self.abs_start_pos - 1, -1):
-            if self._s[i] not in characters:
-                self._stop_pos = i + 1
-                return
-        self._stop_pos = 0
-
-    def strip_self(self, characters=WHITESPACE_CHARS):
-        self.lstrip_self(characters)
-        self.rstrip_self(characters)
+                self._pos = i
+                return True
+        self._pos = len(self._s)
+        return False
 
     def __getitem__(self, val):
-        offset = self.start_pos
+        offset = self.pos
         if isinstance(val, int):
             val += offset
         elif isinstance(val, slice):
@@ -164,14 +130,21 @@ class SubString:
         return self._s[val]
 
     def __str__(self) -> str:
-        return self._s[self.slice]
+        return self._s[self._pos:]
+
+    def str_from(self, pos):
+        ''' Returns a string from the given pos to the current pos, not including current char '''
+        return self._s[pos:self._pos]
+
+    def str_from_mark(self):
+        return self.str_from(self._mark)
 
     def __len__(self) -> int:
-        len = self.abs_stop_pos - self.abs_start_pos
-        if len < 0:
+        l = len(self._s) - self._pos
+        if l < 0:
             return 0
         else:
-            return len
+            return l
 
     def startswith(self, s):
         if len(self) == 0:
@@ -180,7 +153,25 @@ class SubString:
             return (self[0:len(s)] == s)
 
     def find(self, s, start=0, end=None):
-        return str(self).find(s, start, end)
+        start += self._pos
+        if end is not None:
+            end += self._pos
+        return self._s.find(s, start, end)
+
+    def current_char(self):
+        if len(self) <= 0:
+            return ''
+        else:
+            return self[0]
+
+    def is_current_char_in(self, characters):
+        if len(characters) <= 0:
+            raise ValueError('characters is empty')
+        elif len(self) <= 0:
+            # There is no current char
+            return False
+        else:
+            return self[0] in characters
 
 class FileIterable:
     ''' Base class for a custom file iterable '''
@@ -339,6 +330,7 @@ class SharedFileWriter:
             self._file_entry = __class__.files[file_path]
             self._file_entry['count'] += 1
             self._file = self._file_entry['file']
+        # Copy over write and flush methods
         self.write = self._file.write
         self.flush = self._file.flush
 
@@ -346,6 +338,7 @@ class SharedFileWriter:
         with __class__.files_mutex:
             __class__.files[self._file_path]['count'] -= 1
             if __class__.files[self._file_path]['count'] <= 0:
+                # File is no longer used
                 del __class__.files[self._file_path]
                 self._file.close()
 
@@ -381,18 +374,17 @@ class RangeSedCondition(SedCondition):
         return dat.line_number >= self._start_line and dat.line_number <= self._end_line
 
     @staticmethod
-    def from_string(s:SubString):
-        s.lstrip_self()
-        if len(s) > 0 and s[0] in NUMBER_CHARS:
-            pos = s.start_pos
-            s.lstrip_self(NUMBER_CHARS)
-            first_num = int(s.base_str[pos:s.start_pos])
+    def from_string(s:StringParser):
+        if s.advance_while() and s[0] in NUMBER_CHARS:
+            s.mark()
+            s.advance_while(NUMBER_CHARS)
+            first_num = int(s.str_from_mark())
             if len(s) > 0 and s[0] == ',':
-                s.advance_start(1)
+                s.advance(1)
                 if len(s) > 0 and s[0] in NUMBER_CHARS:
-                    pos = s.start_pos
-                    s.lstrip_self(NUMBER_CHARS)
-                    second_num = int(s.base_str[pos:s.start_pos])
+                    s.mark()
+                    s.advance_while(NUMBER_CHARS)
+                    second_num = int(s.str_from_mark())
                     return RangeSedCondition(first_num, second_num)
                 else:
                     raise SedParsingException('unexpected `,\'')
@@ -413,15 +405,13 @@ class RegexSedCondition(SedCondition):
         return (re.match(self._pattern, dat.bytes) is not None)
 
     @staticmethod
-    def from_string(s:SubString):
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == '/':
-            s.advance_start(1)
-            pos = s.start_pos
-            s.advance_start_until('/')
-            if len(s) > 0 and s[0] == '/':
-                condition = RegexSedCondition(s.base_str[pos:s.start_pos])
-                s.advance_start(1)
+    def from_string(s:StringParser):
+        if s.advance_while() and s[0] == '/':
+            s.advance(1)
+            s.mark()
+            if s.advance_until('/'):
+                condition = RegexSedCondition(s.str_from_mark())
+                s.advance(1)
                 return condition
             else:
                 raise SedParsingException('unterminated address regex')
@@ -456,7 +446,7 @@ class SubstituteCommand(SedCommand):
         if isinstance(find_pattern, str):
             find_pattern = find_pattern.encode()
         self._find_bytes = find_pattern
-        # TODO: implement special sequences?
+        # TODO: implement special sequences using replace callback instead?
         self._replace = replace_pattern
         if isinstance(self._replace, str):
             self._replace = self._replace.encode()
@@ -569,40 +559,37 @@ class SubstituteCommand(SedCommand):
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
-            s = SubString(s)
+            s = StringParser(s)
 
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
             splitter = s[1]
-            s.advance_start(2)
-            pos = s.start_pos
-            s.advance_start_until(splitter)
-            if len(s) == 0:
+            s.advance(2)
+            s.mark()
+            if not s.advance_until(splitter):
                 raise SedParsingException('unterminated `s\' command')
-            find_pattern = s.base_str[pos:s.start_pos]
-            s.advance_start(1)
-            pos = s.start_pos
-            s.advance_start_until(splitter)
-            if len(s) == 0:
+            find_pattern = s.str_from_mark()
+            s.advance(1)
+            s.mark()
+            if not s.advance_until(splitter):
                 raise SedParsingException('unterminated `s\' command')
-            replace_pattern = s.base_str[pos:s.start_pos]
-            s.advance_start(1)
+            replace_pattern = s.str_from_mark()
+            s.advance(1)
             command = SubstituteCommand(condition, find_pattern, replace_pattern)
-            s.lstrip_self()
-            while len(s) > 0 and s[0] not in '\n;':
+            while s.advance_while() and s[0] not in END_COMMAND_CHARS:
                 c = s[0]
-                s.advance_start(1)
+                s.mark()
+                s.advance(1)
                 if c in NUMBER_CHARS:
-                    pos = s.start_pos - 1
-                    s.lstrip_self(NUMBER_CHARS)
-                    command.nth_match = int(s.base_str[pos:s.start_pos])
+                    s.advance_while(NUMBER_CHARS)
+                    command.nth_match = int(s.str_from_mark())
                 elif c == 'g':
                     command.global_replace = True
                 elif c == 'p':
                     command.print_matched_lines = True
                 elif c == 'w':
-                    file_name = s.base_str[s.start_pos:].strip()
-                    s.advance_start_until('\n;') # Used the rest of the characters here
+                    s.mark()
+                    s.advance_until(END_COMMAND_CHARS) # Used the rest of the characters here
+                    file_name = s.str_from_mark().strip()
                     if file_name == '/dev/stdout':
                         command.matched_file = sys.stdout.buffer
                     elif file_name == '/dev/stderr':
@@ -616,7 +603,6 @@ class SubstituteCommand(SedCommand):
                 elif c == 'm' or c == 'M':
                     command.multiline_mode = True
                 # else: ignore
-                s.lstrip_self()
             return command
         else:
             raise SedParsingException('Not a substitute sequence')
@@ -639,16 +625,15 @@ class AppendCommand(SedCommand):
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
-            s = SubString(s)
+            s = StringParser(s)
 
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
-            s.advance_start(1)
+        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
             if len(s) > 0 and s[0] == '\\':
-                s.advance_start(1)
-            pos = s.start_pos
-            s.advance_start_until('\n;')
-            return AppendCommand(condition, s.base_str[pos:])
+                s.advance(1)
+            s.mark()
+            s.advance_until(END_COMMAND_CHARS)
+            return AppendCommand(condition, s.str_from_mark())
         else:
             raise SedParsingException('Not an append sequence')
 
@@ -667,15 +652,14 @@ class BranchCommand(SedCommand):
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
-            s = SubString(s)
+            s = StringParser(s)
 
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
-            s.advance_start(1)
-            s.lstrip_self()
-            pos = s.start_pos
-            s.advance_start_until('\n;')
-            branch_name = s.base_str[pos:s.start_pos]
+        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_while()
+            s.mark()
+            s.advance_until(END_COMMAND_CHARS)
+            branch_name = s.str_from_mark()
             return BranchCommand(condition, branch_name)
         else:
             raise SedParsingException('Not a branch sequence')
@@ -697,18 +681,17 @@ class ReplaceCommand(SedCommand):
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
-            s = SubString(s)
+            s = StringParser(s)
 
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
-            s.advance_start(1)
+        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
             if len(s) > 0 and s[0] == '\\':
-                s.advance_start(1)
+                s.advance(1)
             else:
-                s.lstrip_self()
-            pos = s.start_pos
-            s.advance_start_until('\n;')
-            replace = s.base_str[pos:s.start_pos]
+                s.advance_while()
+            s.mark()
+            s.advance_until(END_COMMAND_CHARS)
+            replace = s.str_from_mark()
             return ReplaceCommand(condition, replace)
         else:
             raise SedParsingException('Not a replace sequence')
@@ -727,14 +710,11 @@ class DeleteCommand(SedCommand):
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
-            s = SubString(s)
+            s = StringParser(s)
 
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
-            s.advance_start(1)
-            s.lstrip_self()
-            if len(s) > 0:
-                raise SedParsingException('extra characters after command')
+        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_while()
             return DeleteCommand(condition)
         else:
             raise SedParsingException('Not a delete command')
@@ -758,14 +738,11 @@ class DeleteToNewlineCommand(SedCommand):
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
-            s = SubString(s)
+            s = StringParser(s)
 
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
-            s.advance_start(1)
-            s.lstrip_self()
-            if len(s) > 0:
-                raise SedParsingException('extra characters after command')
+        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_while()
             return DeleteToNewlineCommand(condition)
         else:
             raise SedParsingException('Not a delete command')
@@ -780,15 +757,14 @@ class Label(SedCommand):
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
-            s = SubString(s)
+            s = StringParser(s)
 
-        s.lstrip_self()
-        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
-            s.advance_start(1)
-            s.lstrip_self()
-            pos = s.start_pos
-            s.advance_start_until('\n;')
-            label = s.base_str[pos:s.start_pos]
+        if s.advance_while() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_while()
+            s.mark()
+            s.advance_until(END_COMMAND_CHARS)
+            label = s.str_from_mark()
             return Label(condition, label)
         else:
             raise SedParsingException('Not a label')
@@ -831,9 +807,9 @@ class Sed:
 
     def _parse_script_lines(self, script_lines):
         for i, line in enumerate(script_lines):
-            substr_line = SubString(line)
+            substr_line = StringParser(line)
             while len(substr_line) > 0:
-                substr_line.lstrip_self()
+                substr_line.advance_while()
                 c = substr_line[0]
                 try:
                     if c in NUMBER_CHARS:
@@ -844,22 +820,19 @@ class Sed:
                         condition = RegexSedCondition.from_string(substr_line)
                     else:
                         condition = None
-                    substr_line.lstrip_self()
-                    if len(substr_line) != 0:
+                    if substr_line.advance_while() and substr_line[0] not in END_COMMAND_CHARS:
                         command_type = SED_COMMANDS.get(substr_line[0], None)
                         if command_type is None:
                             raise SedParsingException(f'Invalid command: {substr_line[0]}')
                         command = command_type.from_string(condition, substr_line)
-                        substr_line.lstrip_self()
-                        pos = substr_line.start_pos
-                        substr_line.lstrip_self(WHITESPACE_CHARS + '\n;')
-                        if len(substr_line) != 0 and pos == substr_line.start_pos:
-                            raise SedParsingException(f'unhandled characters')
+                        if substr_line.advance_while() and substr_line[0] not in END_COMMAND_CHARS:
+                            raise SedParsingException(f'extra characters after command')
+                        substr_line.advance_while(WHITESPACE_CHARS + END_COMMAND_CHARS)
                         self._commands.append(command)
                     elif condition is not None:
                         raise SedParsingException('missing command')
                 except SedParsingException as ex:
-                    raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.start_pos+1}: {ex}')
+                    raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.pos+1}: {ex}')
 
     def add_command(self, command_or_commands):
         if isinstance(command_or_commands, list):
