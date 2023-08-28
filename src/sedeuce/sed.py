@@ -351,8 +351,10 @@ class SharedFileWriter:
 
 class WorkingData:
     def __init__(self) -> None:
+        self.newline = b'\n'
         self.line_number = 0
         self.bytes = b''
+        self.jump_to = None
 
 class SedCondition:
     def is_match(self, dat:WorkingData) -> bool:
@@ -429,6 +431,7 @@ class RegexSedCondition(SedCondition):
 class SedCommand:
     def __init__(self, condition:SedCondition) -> None:
         self._condition = condition
+        self.label = None
 
     def handle(self, dat:WorkingData) -> bool:
         if self._condition is None or self._condition.is_match(dat):
@@ -585,8 +588,8 @@ class SubstituteCommand(SedCommand):
             replace_pattern = s.base_str[pos:s.start_pos]
             s.advance_start(1)
             command = SubstituteCommand(condition, find_pattern, replace_pattern)
-            s.strip_self()
-            while len(s) > 0:
+            s.lstrip_self()
+            while len(s) > 0 and s[0] not in '\n;':
                 c = s[0]
                 s.advance_start(1)
                 if c in NUMBER_CHARS:
@@ -599,7 +602,7 @@ class SubstituteCommand(SedCommand):
                     command.print_matched_lines = True
                 elif c == 'w':
                     file_name = s.base_str[s.start_pos:].strip()
-                    s.advance_start() # Used the rest of the characters here
+                    s.advance_start_until('\n;') # Used the rest of the characters here
                     if file_name == '/dev/stdout':
                         command.matched_file = sys.stdout.buffer
                     elif file_name == '/dev/stderr':
@@ -613,6 +616,7 @@ class SubstituteCommand(SedCommand):
                 elif c == 'm' or c == 'M':
                     command.multiline_mode = True
                 # else: ignore
+                s.lstrip_self()
             return command
         else:
             raise SedParsingException('Not a substitute sequence')
@@ -626,22 +630,11 @@ class AppendCommand(SedCommand):
             self._append_value = append_value.encode()
         else:
             self._append_value = append_value
-        self._newline_value = b'\n'
-
-    @property
-    def newline_value(self):
-        return self._newline_value
-
-    # TODO: set this when newline value is different from \n
-    @newline_value.setter
-    def newline_value(self, newline_value):
-        if isinstance(newline_value, str):
-            self._newline_value = newline_value.encode()
-        else:
-            self._newline_value = newline_value
 
     def _handle(self, dat:WorkingData) -> bool:
-        dat.bytes += self._append_value + self._newline_value
+        if not dat.bytes.endswith(dat.newline):
+            dat.bytes += dat.newline
+        dat.bytes += self._append_value + dat.newline
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -654,27 +647,184 @@ class AppendCommand(SedCommand):
             if len(s) > 0 and s[0] == '\\':
                 s.advance_start(1)
             pos = s.start_pos
-            s.advance_start()
+            s.advance_start_until('\n;')
             return AppendCommand(condition, s.base_str[pos:])
         else:
             raise SedParsingException('Not an append sequence')
 
+class BranchCommand(SedCommand):
+    COMMAND_CHAR = 'b'
+
+    def __init__(self, condition: SedCondition, branch_name=''):
+        super().__init__(condition)
+        self._branch_name = branch_name
+
+    def _handle(self, dat:WorkingData) -> bool:
+        if self._branch_name:
+            dat.jump_to = self._branch_name
+        return False
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = SubString(s)
+
+        s.lstrip_self()
+        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
+            s.advance_start(1)
+            s.lstrip_self()
+            pos = s.start_pos
+            s.advance_start_until('\n;')
+            branch_name = s.base_str[pos:s.start_pos]
+            return BranchCommand(condition, branch_name)
+        else:
+            raise SedParsingException('Not a branch sequence')
+
+class ReplaceCommand(SedCommand):
+    COMMAND_CHAR = 'c'
+
+    def __init__(self, condition: SedCondition, replace):
+        super().__init__(condition)
+        if isinstance(replace, str):
+            self._replace = replace.encode()
+        else:
+            self._replace = replace
+
+    def _handle(self, dat:WorkingData) -> bool:
+        dat.bytes = self._replace
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = SubString(s)
+
+        s.lstrip_self()
+        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
+            s.advance_start(1)
+            if len(s) > 0 and s[0] == '\\':
+                s.advance_start(1)
+            else:
+                s.lstrip_self()
+            pos = s.start_pos
+            s.advance_start_until('\n;')
+            replace = s.base_str[pos:s.start_pos]
+            return ReplaceCommand(condition, replace)
+        else:
+            raise SedParsingException('Not a replace sequence')
+
+class DeleteCommand(SedCommand):
+    COMMAND_CHAR = 'd'
+
+    def __init__(self, condition: SedCondition):
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> bool:
+        dat.bytes = b''
+        dat.jump_to = -1 # jump to end
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = SubString(s)
+
+        s.lstrip_self()
+        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
+            s.advance_start(1)
+            s.lstrip_self()
+            if len(s) > 0:
+                raise SedParsingException('extra characters after command')
+            return DeleteCommand(condition)
+        else:
+            raise SedParsingException('Not a delete command')
+
+class DeleteToNewlineCommand(SedCommand):
+    COMMAND_CHAR = 'D'
+
+    def __init__(self, condition: SedCondition):
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> bool:
+        pos = dat.bytes.find(dat.newline)
+        if pos >= 0:
+            dat.bytes = dat.bytes[:pos+1]
+            dat.jump_to = 0 # restart
+        else:
+            dat.bytes = b''
+            dat.jump_to = -1 # jump to end
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = SubString(s)
+
+        s.lstrip_self()
+        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
+            s.advance_start(1)
+            s.lstrip_self()
+            if len(s) > 0:
+                raise SedParsingException('extra characters after command')
+            return DeleteToNewlineCommand(condition)
+        else:
+            raise SedParsingException('Not a delete command')
+
+class Label(SedCommand):
+    COMMAND_CHAR = ':'
+
+    def __init__(self, condition: SedCondition, label):
+        super().__init__(condition)
+        self.label = label
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = SubString(s)
+
+        s.lstrip_self()
+        if len(s) > 0 and s[0] == __class__.COMMAND_CHAR:
+            s.advance_start(1)
+            s.lstrip_self()
+            pos = s.start_pos
+            s.advance_start_until('\n;')
+            label = s.base_str[pos:s.start_pos]
+            return Label(condition, label)
+        else:
+            raise SedParsingException('Not a label')
+
 SED_COMMANDS = {
     SubstituteCommand.COMMAND_CHAR: SubstituteCommand,
-    AppendCommand.COMMAND_CHAR: AppendCommand
+    AppendCommand.COMMAND_CHAR: AppendCommand,
+    BranchCommand.COMMAND_CHAR: BranchCommand,
+    ReplaceCommand.COMMAND_CHAR: ReplaceCommand,
+    DeleteCommand.COMMAND_CHAR: DeleteCommand,
+    DeleteToNewlineCommand.COMMAND_CHAR: DeleteToNewlineCommand,
+    Label.COMMAND_CHAR: Label
 }
 
 class Sed:
     def __init__(self):
-        # TODO: support list within list when brackets are used
         self._commands = []
         self._files = []
         self.in_place = False
         self.in_place_backup_suffix = None
+        self.newline = '\n'
+
+    @property
+    def newline(self):
+        return self._newline
+
+    @newline.setter
+    def newline(self, newline):
+        if isinstance(newline, str):
+            self._newline = newline.encode()
+        else:
+            self._newline = newline
 
     def add_script(self, script:str):
         # TODO: Support brackets
-        self._parse_script_lines(script.split(';'))
+        self._parse_script_lines([script])
 
     def add_script_lines(self, script_lines:list):
         self._parse_script_lines(script_lines)
@@ -682,31 +832,34 @@ class Sed:
     def _parse_script_lines(self, script_lines):
         for i, line in enumerate(script_lines):
             substr_line = SubString(line)
-            substr_line.strip_self()
-            c = substr_line[0]
-            try:
-                if c in NUMBER_CHARS:
-                    # Range condition
-                    condition = RangeSedCondition.from_string(substr_line)
-                elif c == '/':
-                    # Regex condition
-                    condition = RegexSedCondition.from_string(substr_line)
-                else:
-                    condition = None
+            while len(substr_line) > 0:
                 substr_line.lstrip_self()
-                if len(substr_line) != 0:
-                    command_type = SED_COMMANDS.get(substr_line[0], None)
-                    if command_type is None:
-                        raise SedParsingException(f'Invalid command: {substr_line[0]}')
-                    command = command_type.from_string(condition, substr_line)
-                    substr_line.strip_self()
+                c = substr_line[0]
+                try:
+                    if c in NUMBER_CHARS:
+                        # Range condition
+                        condition = RangeSedCondition.from_string(substr_line)
+                    elif c == '/':
+                        # Regex condition
+                        condition = RegexSedCondition.from_string(substr_line)
+                    else:
+                        condition = None
+                    substr_line.lstrip_self()
                     if len(substr_line) != 0:
-                        raise SedParsingException(f'unhandled: {substr_line}')
-                    self._commands.append(command)
-                elif condition is not None:
-                    raise SedParsingException('missing command')
-            except SedParsingException as ex:
-                raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.start_pos+1}: {ex}')
+                        command_type = SED_COMMANDS.get(substr_line[0], None)
+                        if command_type is None:
+                            raise SedParsingException(f'Invalid command: {substr_line[0]}')
+                        command = command_type.from_string(condition, substr_line)
+                        substr_line.lstrip_self()
+                        pos = substr_line.start_pos
+                        substr_line.lstrip_self(WHITESPACE_CHARS + '\n;')
+                        if len(substr_line) != 0 and pos == substr_line.start_pos:
+                            raise SedParsingException(f'unhandled characters')
+                        self._commands.append(command)
+                    elif condition is not None:
+                        raise SedParsingException('missing command')
+                except SedParsingException as ex:
+                    raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.start_pos+1}: {ex}')
 
     def add_command(self, command_or_commands):
         if isinstance(command_or_commands, list):
@@ -728,15 +881,16 @@ class Sed:
 
     def execute(self):
         if not self._files:
-            files = [StdinIterable()]
+            files = [StdinIterable(end=self.newline)]
         else:
-            files = [AutoInputFileIterable(f) for f in self._files]
+            files = [AutoInputFileIterable(f, newline_str=self.newline) for f in self._files]
 
         line_num = 0
         for file in files:
             file_changed = False
 
             if self.in_place and not isinstance(file, StdinIterable):
+                # Write to temporary file to be copied to target when it changes
                 tmp_file = tempfile.NamedTemporaryFile(mode='wb')
                 out_file = tmp_file
             else:
@@ -746,11 +900,36 @@ class Sed:
             for line in file:
                 line_num += 1
                 dat = WorkingData()
+                dat.newline = self.newline
                 dat.line_number = line_num
                 dat.bytes = line
-                for command in self._commands:
+                i = 0
+                while i < len(self._commands):
+                    command = self._commands[i]
+                    i += 1
                     if command.handle(dat):
                         file_changed = True
+                    # Command may set jump_to when we need to jump to another command
+                    if dat.jump_to is not None:
+                        jump_to = dat.jump_to
+                        dat.jump_to = None
+                        # jump_to may be an index or label
+                        if isinstance(jump_to, int):
+                            if jump_to < 0:
+                                # Jump to end
+                                i = len(self._commands)
+                            else:
+                                # Jump to index (usually 0)
+                                i = jump_to
+                        else:
+                            i = -1
+                            for j,c in enumerate(self._commands):
+                                if c.label == jump_to:
+                                    i = j
+                                    break
+                            if i < 0:
+                                raise SedParsingException(f"can't find label for jump to `{jump_to}'")
+                # Write the line to destination
                 out_file.write(dat.bytes)
                 out_file.flush()
 
