@@ -631,6 +631,8 @@ class AppendCommand(SedCommand):
             s.advance(1)
             if len(s) > 0 and s[0] == '\\':
                 s.advance(1)
+            else:
+                s.advance_past()
             s.mark()
             s.advance_until(END_COMMAND_CHARS)
             return AppendCommand(condition, s.str_from_mark())
@@ -675,7 +677,10 @@ class ReplaceCommand(SedCommand):
             self._replace = replace
 
     def _handle(self, dat:WorkingData) -> bool:
+        add_newline = dat.bytes.endswith(dat.newline)
         dat.bytes = self._replace
+        if add_newline:
+            dat.bytes += dat.newline
         return True
 
     @staticmethod
