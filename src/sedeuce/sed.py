@@ -34,10 +34,13 @@ import threading
 __version__ = '0.1.1'
 PACKAGE_NAME = 'sedeuce'
 
-WHITESPACE_CHARS = (' \t\n\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
+# All normal whitespace chars except \n which has meaning here
+WHITESPACE_CHARS = (' \t\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
                     '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000')
 NUMBER_CHARS = '0123456789'
 END_COMMAND_CHARS = '\n;'
+REPLACE_END_COMMAND_CHARS = '\n'
+APPEND_END_COMMAND_CHARS = '\n'
 
 class SedParsingException(Exception):
     def __init__(self, *args: object) -> None:
@@ -634,7 +637,7 @@ class AppendCommand(SedCommand):
             else:
                 s.advance_past()
             s.mark()
-            s.advance_until(END_COMMAND_CHARS)
+            s.advance_until(APPEND_END_COMMAND_CHARS)
             return AppendCommand(condition, s.str_from_mark())
         else:
             raise SedParsingException('Not an append sequence')
@@ -695,37 +698,16 @@ class ReplaceCommand(SedCommand):
             else:
                 s.advance_past()
             s.mark()
-            s.advance_until(END_COMMAND_CHARS)
+            s.advance_until(REPLACE_END_COMMAND_CHARS)
             replace = s.str_from_mark()
             return ReplaceCommand(condition, replace)
         else:
             raise SedParsingException('Not a replace sequence')
 
-class DeleteCommand(SedCommand):
-    COMMAND_CHAR = 'd'
-
-    def __init__(self, condition: SedCondition):
-        super().__init__(condition)
-
-    def _handle(self, dat:WorkingData) -> bool:
-        dat.bytes = b''
-        dat.jump_to = -1 # jump to end
-        return True
-
-    @staticmethod
-    def from_string(condition:SedCondition, s):
-        if isinstance(s, str):
-            s = StringParser(s)
-
-        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
-            s.advance(1)
-            s.advance_past()
-            return DeleteCommand(condition)
-        else:
-            raise SedParsingException('Not a delete command')
-
 class DeleteToNewlineCommand(SedCommand):
-    COMMAND_CHAR = 'D'
+    # There doesn't seem to be a difference between these two
+    COMMAND_CHAR = 'd'
+    COMMAND_CHAR2 = 'D'
 
     def __init__(self, condition: SedCondition):
         super().__init__(condition)
@@ -733,11 +715,11 @@ class DeleteToNewlineCommand(SedCommand):
     def _handle(self, dat:WorkingData) -> bool:
         pos = dat.bytes.find(dat.newline)
         if pos >= 0:
-            dat.bytes = dat.bytes[:pos+1]
-            dat.jump_to = 0 # restart
+            dat.bytes = dat.bytes[pos+1:]
         else:
             dat.bytes = b''
-            dat.jump_to = -1 # jump to end
+        dat.jump_to = -1 # jump to end
+        self._last_processed_line = dat.line_number
         return True
 
     @staticmethod
@@ -779,8 +761,8 @@ SED_COMMANDS = {
     AppendCommand.COMMAND_CHAR: AppendCommand,
     BranchCommand.COMMAND_CHAR: BranchCommand,
     ReplaceCommand.COMMAND_CHAR: ReplaceCommand,
-    DeleteCommand.COMMAND_CHAR: DeleteCommand,
     DeleteToNewlineCommand.COMMAND_CHAR: DeleteToNewlineCommand,
+    DeleteToNewlineCommand.COMMAND_CHAR2: DeleteToNewlineCommand,
     Label.COMMAND_CHAR: Label
 }
 

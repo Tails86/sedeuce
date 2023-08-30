@@ -240,6 +240,17 @@ class CliTests(unittest.TestCase):
         del out_lines[2]
         self.assertEqual(in_lines, out_lines)
 
+    def test_delete_jumps_to_end(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            # hello appended, then original line deleted
+            # appending " world" should not be executed
+            sed.main(['3ahello\n3d\n3a\ world'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertGreater(len(in_lines), 2)
+        self.assertEqual(in_lines[2], 'hello')
+
     def test_branch_to_label(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
             patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
@@ -257,11 +268,12 @@ class CliTests(unittest.TestCase):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
             patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
         :
-            sed.main(['9a    this line is appended after line 9'])
+            # Semicolon is not an end command char - only \n is
+            sed.main(['9a    this line is appended after line 9;d'])
             out_lines = test_file1.split('\n')
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(len(in_lines), len(out_lines) + 1)
-        self.assertEqual(in_lines[9], 'this line is appended after line 9')
+        self.assertEqual(in_lines[9], 'this line is appended after line 9;d')
 
     def test_append_with_slash(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
@@ -277,10 +289,11 @@ class CliTests(unittest.TestCase):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
             patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
         :
-            sed.main(['10c    this text is put on line 10'])
+            # Semicolon is not an end command char - only \n is
+            sed.main(['10c    this text is put on line 10;d'])
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertGreater(len(in_lines), 9)
-        self.assertEqual(in_lines[9], 'this text is put on line 10')
+        self.assertEqual(in_lines[9], 'this text is put on line 10;d')
 
     def test_replace_with_slash(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
