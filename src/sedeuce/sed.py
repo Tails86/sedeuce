@@ -522,7 +522,7 @@ class SubstituteCommand(SedCommand):
                     # Only first match is valid
                     nth_match = 1
 
-        if self.execute_replacement:
+        if self.execute_replacement or nth_match is not None:
             # This is a pain in the ass - manually go to each match in order to execute
             match_idx = 0
             offset = 0
@@ -534,13 +534,16 @@ class SubstituteCommand(SedCommand):
                 if nth_match is None or (match_idx + 1) >= nth_match:
                     matched = True
                     new_str = re.sub(self._find, self._replace, match.group(0))
-                    # Execute the replacement
-                    proc_output = subprocess.run(new_str.decode(), shell=True, capture_output=True)
-                    new_dat = proc_output.stdout
-                    if new_dat.endswith(b'\n'):
-                        new_dat = new_dat[:-1]
-                    if new_dat.endswith(b'\r'):
-                        new_dat = new_dat[:-1]
+                    if self.execute_replacement:
+                        # Execute the replacement
+                        proc_output = subprocess.run(new_str.decode(), shell=True, capture_output=True)
+                        new_dat = proc_output.stdout
+                        if new_dat.endswith(b'\n'):
+                            new_dat = new_dat[:-1]
+                        if new_dat.endswith(b'\r'):
+                            new_dat = new_dat[:-1]
+                    else:
+                        new_dat = new_str
                     dat.bytes = dat.bytes[0:start] + new_dat + dat.bytes[end:]
                     offset = start + len(new_dat)
                     match = re.search(self._find, dat.bytes[offset:])
@@ -554,17 +557,6 @@ class SubstituteCommand(SedCommand):
             if matched:
                 self._match_made(dat)
                 return True
-        elif nth_match is not None:
-            for i,match in enumerate(re.finditer(self._find, dat.bytes)):
-                if (i + 1) >= nth_match:
-                    start = match.start(0)
-                    dat.bytes = (
-                        dat.bytes[0:start]
-                        + re.sub(self._find, self._replace, dat.bytes[start:], count)
-                    )
-                    self._match_made(dat)
-                    return True
-            return False
         else:
             result = re.subn(self._find, self._replace, dat.bytes, count)
             if result[1] > 0:
