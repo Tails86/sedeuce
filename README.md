@@ -1,5 +1,6 @@
 # sedeuce
-A sed clone in Python with both CLI and library interfaces
+
+A seductive sed clone in Python with both CLI and library interfaces
 
 ## Current Support
 

@@ -34,6 +34,10 @@ import threading
 __version__ = '0.1.1'
 PACKAGE_NAME = 'sedeuce'
 
+# sed syntax
+# \n (newline) always separates one command from the next unless proceeded by a slash: \
+# ; usually separates one command from the next, but it depends on the command
+
 # All normal whitespace chars except \n which has meaning here
 WHITESPACE_CHARS = (' \t\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
                     '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000')
@@ -449,6 +453,7 @@ class SubstituteCommand(SedCommand):
         if isinstance(find_pattern, str):
             find_pattern = find_pattern.encode()
         self._find_bytes = find_pattern
+        self._only_first_match = self._find_bytes.startswith(b'^')
         # TODO: implement special sequences using replace callback instead?
         self._replace = replace_pattern
         if isinstance(self._replace, str):
@@ -506,6 +511,17 @@ class SubstituteCommand(SedCommand):
         else:
             count = 1
 
+        # Determine what nth match is based on self data
+        nth_match = self.nth_match
+        if self._only_first_match:
+            if self.nth_match is not None:
+                if (self.nth_match == 0 and not self.global_replace) or self.nth_match > 1:
+                    # No way to ever match this
+                    return False
+                else:
+                    # Only first match is valid
+                    nth_match = 1
+
         if self.execute_replacement:
             # This is a pain in the ass - manually go to each match in order to execute
             match_idx = 0
@@ -515,7 +531,7 @@ class SubstituteCommand(SedCommand):
             while match:
                 start = match.start(0) + offset
                 end = match.end(0) + offset
-                if self.nth_match is None or (match_idx + 1) >= self.nth_match:
+                if nth_match is None or (match_idx + 1) >= nth_match:
                     matched = True
                     new_str = re.sub(self._find, self._replace, match.group(0))
                     # Execute the replacement
@@ -528,7 +544,7 @@ class SubstituteCommand(SedCommand):
                     dat.bytes = dat.bytes[0:start] + new_dat + dat.bytes[end:]
                     offset = start + len(new_dat)
                     match = re.search(self._find, dat.bytes[offset:])
-                    if self.nth_match is not None and not self.global_replace:
+                    if nth_match is not None and not self.global_replace:
                         # All done
                         break
                 else:
@@ -538,9 +554,9 @@ class SubstituteCommand(SedCommand):
             if matched:
                 self._match_made(dat)
                 return True
-        elif self.nth_match is not None:
+        elif nth_match is not None:
             for i,match in enumerate(re.finditer(self._find, dat.bytes)):
-                if (i + 1) >= self.nth_match:
+                if (i + 1) >= nth_match:
                     start = match.start(0)
                     dat.bytes = (
                         dat.bytes[0:start]
@@ -787,7 +803,25 @@ class Sed:
 
     def add_script(self, script:str):
         # TODO: Support brackets
-        self._parse_script_lines([script])
+        # Since newline is always a command terminator, parse for that here
+        script_lines = script.split('\n')
+        # Iterate in reverse, 1 from end so that we can glue the "next" one if escaped char found
+        for i in range(len(script_lines)-2, -1, -1):
+            # If there are an odd number of slashes at the end of the string,
+            # then next newline was escaped;
+            # ex: \ escapes next \\ just means slash and \\\ means slash plus escape next
+            count = 0
+            for c in reversed(script_lines[i]):
+                if c == '\\':
+                    count += 1
+                else:
+                    break
+            if count % 2 == 1:
+                # Glue the next one to the end of this one then delete next
+                script_lines[i] += script_lines[i+1]
+                del script_lines[i+1]
+
+        self._parse_script_lines(script_lines)
 
     def add_script_lines(self, script_lines:list):
         self._parse_script_lines(script_lines)
