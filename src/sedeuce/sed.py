@@ -506,11 +506,6 @@ class SubstituteCommand(SedCommand):
             self.matched_file.flush()
 
     def _handle(self, dat:WorkingData) -> bool:
-        if self.global_replace and not self.execute_replacement:
-            count = 0
-        else:
-            count = 1
-
         # Determine what nth match is based on self data
         nth_match = self.nth_match
         if self._only_first_match:
@@ -522,50 +517,51 @@ class SubstituteCommand(SedCommand):
                     # Only first match is valid
                     nth_match = 1
 
-        if self.execute_replacement or nth_match is not None:
-            # This is a pain in the ass - manually go to each match in order to execute
-            match_idx = 0
-            offset = 0
-            match = re.search(self._find, dat.bytes)
-            matched = False
-            while match:
-                start = match.start(0) + offset
-                end = match.end(0) + offset
-                if nth_match is None or (match_idx + 1) >= nth_match:
-                    matched = True
-                    new_str = re.sub(self._find, self._replace, match.group(0))
-                    if self.execute_replacement:
-                        # Execute the replacement
-                        proc_output = subprocess.run(new_str.decode(), shell=True, capture_output=True)
-                        new_dat = proc_output.stdout
-                        if new_dat.endswith(b'\n'):
-                            new_dat = new_dat[:-1]
-                        if new_dat.endswith(b'\r'):
-                            new_dat = new_dat[:-1]
-                    else:
-                        new_dat = new_str
-                    dat.bytes = dat.bytes[0:start] + new_dat + dat.bytes[end:]
-                    offset = start + len(new_dat)
-                    match = re.search(self._find, dat.bytes[offset:])
-                    if nth_match is not None and not self.global_replace:
-                        # All done
-                        break
+        if nth_match is None and not self.global_replace:
+            nth_match = 1
+
+        # This is a pain in the ass - manually go to each match in order to handle all features
+        match_idx = 0
+        offset = 0
+        next_chunk = dat.bytes
+        match = re.search(self._find, next_chunk)
+        matched = False
+        while match:
+            start = match.start(0) + offset
+            end = match.end(0) + offset
+            if nth_match is None or (match_idx + 1) >= nth_match:
+                matched = True
+                new_str = re.sub(self._find, self._replace, match.group(0))
+                if self.execute_replacement:
+                    # Execute the replacement
+                    proc_output = subprocess.run(new_str.decode(), shell=True, capture_output=True)
+                    new_dat = proc_output.stdout
+                    if new_dat.endswith(b'\n'):
+                        new_dat = new_dat[:-1]
+                    if new_dat.endswith(b'\r'):
+                        new_dat = new_dat[:-1]
                 else:
-                    offset = end
-                    match = re.search(self._find, dat.bytes[offset:])
-                match_idx += 1
-            if matched:
-                self._match_made(dat)
-                return True
-        else:
-            result = re.subn(self._find, self._replace, dat.bytes, count)
-            if result[1] > 0:
-                dat.bytes = result[0]
-                self._match_made(dat)
-                return True
+                    new_dat = new_str
+                dat.bytes = dat.bytes[0:start] + new_dat + dat.bytes[end:]
+                if nth_match is not None and not self.global_replace:
+                    # All done
+                    break
+                offset = start + len(new_dat)
             else:
-                # No changes
-                return False
+                offset = end
+
+            if start == end:
+                # Need to advance to prevent infinite loop
+                offset += 1
+            # If we matched while the previous chunk was empty, exit now to prevent infinite loop
+            if not next_chunk:
+                break
+            next_chunk = dat.bytes[offset:]
+            match = re.search(self._find, next_chunk)
+            match_idx += 1
+        if matched:
+            self._match_made(dat)
+            return True
 
     @staticmethod
     def from_string(condition:SedCondition, s):
