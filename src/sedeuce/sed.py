@@ -561,7 +561,7 @@ class SubstituteCommand(SedCommand):
             match_idx += 1
         if matched:
             self._match_made(dat)
-            return True
+        return matched
 
     @staticmethod
     def from_string(condition:SedCondition, s):
