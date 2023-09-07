@@ -38,13 +38,11 @@ PACKAGE_NAME = 'sedeuce'
 # \n (newline) always separates one command from the next unless proceeded by a slash: \
 # ; usually separates one command from the next, but it depends on the command
 
-# All normal whitespace chars except \n which has meaning here
-WHITESPACE_CHARS = (' \t\r\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
+WHITESPACE_CHARS = (' \t\r\n\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
                     '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000')
 NUMBER_CHARS = '0123456789'
-END_COMMAND_CHARS = '\n;'
-REPLACE_END_COMMAND_CHARS = '\n'
-APPEND_END_COMMAND_CHARS = '\n'
+SOMETIMES_END_CMD_CHAR = ';'
+ALWAYS_END_CMD_CHAR = '\n'
 
 class SedParsingException(Exception):
     def __init__(self, *args: object) -> None:
@@ -100,6 +98,10 @@ class StringParser:
         ''' Advances a set number of characters '''
         if inc is not None and inc > 0:
             self._pos += inc
+
+    def advance_end(self):
+        ''' Advance pointer to end of string '''
+        self._pos = len(self._s)
 
     def advance_past(self, characters=WHITESPACE_CHARS):
         ''' Similar to lstrip - advances while current char is in characters
@@ -582,7 +584,7 @@ class SubstituteCommand(SedCommand):
             replace_pattern = s.str_from_mark()
             s.advance(1)
             command = SubstituteCommand(condition, find_pattern, replace_pattern)
-            while s.advance_past() and s[0] not in END_COMMAND_CHARS:
+            while s.advance_past() and s[0] not in SOMETIMES_END_CMD_CHAR:
                 c = s[0]
                 s.mark()
                 s.advance(1)
@@ -595,7 +597,7 @@ class SubstituteCommand(SedCommand):
                     command.print_matched_lines = True
                 elif c == 'w':
                     s.mark()
-                    s.advance_until(END_COMMAND_CHARS) # Used the rest of the characters here
+                    s.advance_until(SOMETIMES_END_CMD_CHAR) # Used the rest of the characters here
                     file_name = s.str_from_mark().strip()
                     if file_name == '/dev/stdout':
                         command.matched_file = sys.stdout.buffer
@@ -641,7 +643,8 @@ class AppendCommand(SedCommand):
             else:
                 s.advance_past()
             s.mark()
-            s.advance_until(APPEND_END_COMMAND_CHARS)
+            # Semicolons are considered part of the append string
+            s.advance_end()
             return AppendCommand(condition, s.str_from_mark())
         else:
             raise SedParsingException('Not an append sequence')
@@ -667,7 +670,7 @@ class BranchCommand(SedCommand):
             s.advance(1)
             s.advance_past()
             s.mark()
-            s.advance_until(END_COMMAND_CHARS)
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
             branch_name = s.str_from_mark()
             return BranchCommand(condition, branch_name)
         else:
@@ -702,7 +705,8 @@ class ReplaceCommand(SedCommand):
             else:
                 s.advance_past()
             s.mark()
-            s.advance_until(REPLACE_END_COMMAND_CHARS)
+            # Semicolons are considered part of the replace string
+            s.advance_end()
             replace = s.str_from_mark()
             return ReplaceCommand(condition, replace)
         else:
@@ -731,12 +735,44 @@ class DeleteToNewlineCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+        if s.advance_past() and (s[0] == __class__.COMMAND_CHAR or s[0] == __class__.COMMAND_CHAR2):
             s.advance(1)
             s.advance_past()
             return DeleteToNewlineCommand(condition)
         else:
             raise SedParsingException('Not a delete command')
+
+class ExecuteCommand(SedCommand):
+    COMMAND_CHAR = 'e'
+
+    def __init__(self, condition: SedCondition, cmd:str=None) -> None:
+        super().__init__(condition)
+        self.cmd = cmd
+
+    def _handle(self, dat: WorkingData) -> bool:
+        if self.cmd:
+            # Execute the command
+            proc_output = subprocess.run(self.cmd, shell=True, capture_output=True)
+            dat.bytes = proc_output.stdout + dat.bytes
+        else:
+            proc_output = subprocess.run(dat.bytes.decode(), shell=True, capture_output=True)
+            dat.bytes = proc_output.stdout
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.mark()
+            # Semicolons are considered part of the execute string
+            s.advance_end()
+            cmd = s.str_from_mark()
+            return ExecuteCommand(condition, cmd)
+        else:
+            raise SedParsingException('Not a replace sequence')
 
 class Label(SedCommand):
     COMMAND_CHAR = ':'
@@ -754,7 +790,7 @@ class Label(SedCommand):
             s.advance(1)
             s.advance_past()
             s.mark()
-            s.advance_until(END_COMMAND_CHARS)
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
             label = s.str_from_mark()
             return Label(condition, label)
         else:
@@ -767,6 +803,7 @@ SED_COMMANDS = {
     ReplaceCommand.COMMAND_CHAR: ReplaceCommand,
     DeleteToNewlineCommand.COMMAND_CHAR: DeleteToNewlineCommand,
     DeleteToNewlineCommand.COMMAND_CHAR2: DeleteToNewlineCommand,
+    ExecuteCommand.COMMAND_CHAR: ExecuteCommand,
     Label.COMMAND_CHAR: Label
 }
 
@@ -792,7 +829,7 @@ class Sed:
     def add_script(self, script:str):
         # TODO: Support brackets
         # Since newline is always a command terminator, parse for that here
-        script_lines = script.split('\n')
+        script_lines = script.split(ALWAYS_END_CMD_CHAR)
         # Iterate in reverse, 1 from end so that we can glue the "next" one if escaped char found
         for i in range(len(script_lines)-2, -1, -1):
             # If there are an odd number of slashes at the end of the string,
@@ -805,8 +842,8 @@ class Sed:
                 else:
                     break
             if count % 2 == 1:
-                # Glue the next one to the end of this one then delete next
-                script_lines[i] += script_lines[i+1]
+                # Remove escaping char, glue the next one to the end of this one, and then delete next
+                script_lines[i] = script_lines[i][:-1] + script_lines[i+1]
                 del script_lines[i+1]
 
         self._parse_script_lines(script_lines)
@@ -829,14 +866,14 @@ class Sed:
                         condition = RegexSedCondition.from_string(substr_line)
                     else:
                         condition = None
-                    if substr_line.advance_past() and substr_line[0] not in END_COMMAND_CHARS:
+                    if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
                         command_type = SED_COMMANDS.get(substr_line[0], None)
                         if command_type is None:
                             raise SedParsingException(f'Invalid command: {substr_line[0]}')
                         command = command_type.from_string(condition, substr_line)
-                        if substr_line.advance_past() and substr_line[0] not in END_COMMAND_CHARS:
+                        if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
                             raise SedParsingException(f'extra characters after command')
-                        substr_line.advance_past(WHITESPACE_CHARS + END_COMMAND_CHARS)
+                        substr_line.advance_past(WHITESPACE_CHARS + SOMETIMES_END_CMD_CHAR)
                         self._commands.append(command)
                     elif condition is not None:
                         raise SedParsingException('missing command')

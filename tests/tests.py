@@ -304,6 +304,32 @@ class CliTests(unittest.TestCase):
         self.assertGreater(len(in_lines), 9)
         self.assertEqual(in_lines[9], '    this text is put on line 10')
 
+    def test_execute_static_cmd(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            sed.main(['1,3eecho hello;echo world'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:10], [
+            'hello',
+            'world',
+            'this is a file',
+            'hello',
+            'world',
+            'which contains several lines,',
+            'hello',
+            'world',
+            'and I am am am using',
+            'it to test'
+        ])
+
+    def test_execute_input_pattern(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn('echo a\necho b\necho c')) \
+        :
+            sed.main(['2e'])
+            in_str = fake_out.buffer.getvalue().decode()
+        self.assertEqual(in_str, 'echo a\nb\necho c')
 
 
 if __name__ == '__main__':
