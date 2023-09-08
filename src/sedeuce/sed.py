@@ -366,6 +366,7 @@ class WorkingData:
         self.line_number = 0
         self.bytes = b''
         self.jump_to = None
+        self.holdspace = b''
 
 class SedCondition:
     def is_match(self, dat:WorkingData) -> bool:
@@ -810,6 +811,119 @@ class FileCommand(SedCommand):
         else:
             raise SedParsingException('Not a file sequence')
 
+class SetHoldspace(SedCommand):
+    COMMAND_CHAR = 'h'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat: WorkingData) -> bool:
+        dat.holdspace = dat.bytes
+        return False
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            better_be_empty = s.str_from_mark().strip()
+            if better_be_empty:
+                raise ValueError('extra characters after command')
+            return SetHoldspace(condition)
+        else:
+            raise SedParsingException('Not a set holdspace sequence')
+
+class AppendHoldspace(SedCommand):
+    COMMAND_CHAR = 'H'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat: WorkingData) -> bool:
+        holdspace = dat.holdspace
+        if not holdspace.endswith(dat.newline):
+            holdspace += dat.newline
+        dat.holdspace = holdspace + dat.bytes
+        return False
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            better_be_empty = s.str_from_mark().strip()
+            if better_be_empty:
+                raise ValueError('extra characters after command')
+            return AppendHoldspace(condition)
+        else:
+            raise SedParsingException('Not an append holdspace sequence')
+
+class SetFromHoldspace(SedCommand):
+    COMMAND_CHAR = 'g'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat: WorkingData) -> bool:
+        holdspace = dat.holdspace
+        if not holdspace.endswith(dat.newline):
+            holdspace += dat.newline
+        dat.bytes = holdspace
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            better_be_empty = s.str_from_mark().strip()
+            if better_be_empty:
+                raise ValueError('extra characters after command')
+            return SetFromHoldspace(condition)
+        else:
+            raise SedParsingException('Not a set from holdspace sequence')
+
+class AppendFromHoldspace(SedCommand):
+    COMMAND_CHAR = 'G'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat: WorkingData) -> bool:
+        holdspace = dat.holdspace
+        if not holdspace.endswith(dat.newline):
+            holdspace += dat.newline
+        dat.bytes = dat.bytes + holdspace
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            better_be_empty = s.str_from_mark().strip()
+            if better_be_empty:
+                raise ValueError('extra characters after command')
+            return AppendFromHoldspace(condition)
+        else:
+            raise SedParsingException('Not an append from holdspace sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -841,6 +955,10 @@ SED_COMMANDS = {
     DeleteToNewlineCommand.COMMAND_CHAR2: DeleteToNewlineCommand,
     ExecuteCommand.COMMAND_CHAR: ExecuteCommand,
     FileCommand.COMMAND_CHAR: FileCommand,
+    SetHoldspace.COMMAND_CHAR: SetHoldspace,
+    AppendHoldspace.COMMAND_CHAR: AppendHoldspace,
+    SetFromHoldspace.COMMAND_CHAR: SetFromHoldspace,
+    AppendFromHoldspace.COMMAND_CHAR: AppendFromHoldspace,
     Label.COMMAND_CHAR: Label
 }
 
@@ -941,9 +1059,12 @@ class Sed:
         else:
             files = [AutoInputFileIterable(f, newline_str=self.newline) for f in self._files]
 
+        dat = WorkingData()
+        dat.newline = self.newline
         line_num = 0
         for file in files:
             file_changed = False
+            dat.file_name = file.name
 
             if self.in_place and not isinstance(file, StdinIterable):
                 # Write to temporary file to be copied to target when it changes
@@ -955,9 +1076,6 @@ class Sed:
 
             for line in file:
                 line_num += 1
-                dat = WorkingData()
-                dat.newline = self.newline
-                dat.file_name = file.name
                 dat.line_number = line_num
                 dat.bytes = line
                 i = 0

@@ -368,6 +368,102 @@ class CliTests(unittest.TestCase):
             'it to test'
         ])
 
+    def test_set_holdspace(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['1h', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        # Nothing should have changed
+        self.assertEqual(in_lines[:4], [
+            'this is a file',
+            'which contains several lines,',
+            'and I am am am using',
+            'it to test'
+        ])
+
+    def test_append_holdspace(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['1H', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        # Nothing should have changed
+        self.assertEqual(in_lines[:4], [
+            'this is a file',
+            'which contains several lines,',
+            'and I am am am using',
+            'it to test'
+        ])
+
+    def test_replace_empty_holdspace(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['2g', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:4], [
+            'this is a file',
+            '',
+            'and I am am am using',
+            'it to test'
+        ])
+
+    def test_append_empty_holdspace(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['2G', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:5], [
+            'this is a file',
+            'which contains several lines,',
+            '',
+            'and I am am am using',
+            'it to test'
+        ])
+
+    def test_set_holdspace_and_append(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['1h;2G', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:5], [
+            'this is a file',
+            'which contains several lines,',
+            'this is a file',
+            'and I am am am using',
+            'it to test'
+        ])
+
+    def test_append_holdspace_and_append(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['1H;2G', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:6], [
+            'this is a file',
+            'which contains several lines,',
+            '',
+            'this is a file',
+            'and I am am am using',
+            'it to test'
+        ])
+
+    def test_set_holdspace_and_set(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['1h;3g', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:4], [
+            'this is a file',
+            'which contains several lines,',
+            'this is a file',
+            'it to test'
+        ])
+
+    def test_set_and_append_holdspace_and_set(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['1h;2H;3g', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:5], [
+            'this is a file',
+            'which contains several lines,',
+            'this is a file',
+            'which contains several lines,',
+            'it to test'
+        ])
+
+
 
 if __name__ == '__main__':
     unittest.main()
