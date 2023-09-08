@@ -217,8 +217,15 @@ class AutoInputFileIterable(FileIterable):
             # Force reading as bytes
             self._file_mode += 'b'
 
+    def __del__(self):
+        if self._fp:
+            self._fp.close()
+            self._fp = None
+
     def __iter__(self):
         # Custom iteration
+        if self._fp:
+            self._fp.close()
         self._fp = open(self._file_path, self._file_mode)
         return self
 
@@ -239,6 +246,7 @@ class AutoInputFileIterable(FileIterable):
                     end = end[-newline_len:]
                 else:
                     # End of file
+                    self._fp.close()
                     self._fp = None
                     break
             if b:
@@ -354,6 +362,7 @@ class SharedFileWriter:
 class WorkingData:
     def __init__(self) -> None:
         self.newline = b'\n'
+        self.file_name = ''
         self.line_number = 0
         self.bytes = b''
         self.jump_to = None
@@ -755,6 +764,7 @@ class ExecuteCommand(SedCommand):
             proc_output = subprocess.run(self.cmd, shell=True, capture_output=True)
             dat.bytes = proc_output.stdout + dat.bytes
         else:
+            # Execute what's in the pattern space and replace the pattern space with the output
             proc_output = subprocess.run(dat.bytes.decode(), shell=True, capture_output=True)
             dat.bytes = proc_output.stdout
         return True
@@ -772,7 +782,33 @@ class ExecuteCommand(SedCommand):
             cmd = s.str_from_mark()
             return ExecuteCommand(condition, cmd)
         else:
-            raise SedParsingException('Not a replace sequence')
+            raise SedParsingException('Not an execute sequence')
+
+class FileCommand(SedCommand):
+    COMMAND_CHAR = 'F'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat: WorkingData) -> bool:
+        dat.bytes = dat.file_name.encode() + dat.newline + dat.bytes
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            better_be_empty = s.str_from_mark().strip()
+            if better_be_empty:
+                raise ValueError('extra characters after command')
+            return FileCommand(condition)
+        else:
+            raise SedParsingException('Not a file sequence')
 
 class Label(SedCommand):
     COMMAND_CHAR = ':'
@@ -804,6 +840,7 @@ SED_COMMANDS = {
     DeleteToNewlineCommand.COMMAND_CHAR: DeleteToNewlineCommand,
     DeleteToNewlineCommand.COMMAND_CHAR2: DeleteToNewlineCommand,
     ExecuteCommand.COMMAND_CHAR: ExecuteCommand,
+    FileCommand.COMMAND_CHAR: FileCommand,
     Label.COMMAND_CHAR: Label
 }
 
@@ -900,7 +937,7 @@ class Sed:
 
     def execute(self):
         if not self._files:
-            files = [StdinIterable(end=self.newline)]
+            files = [StdinIterable(end=self.newline, label='-')]
         else:
             files = [AutoInputFileIterable(f, newline_str=self.newline) for f in self._files]
 
@@ -920,6 +957,7 @@ class Sed:
                 line_num += 1
                 dat = WorkingData()
                 dat.newline = self.newline
+                dat.file_name = file.name
                 dat.line_number = line_num
                 dat.bytes = line
                 i = 0

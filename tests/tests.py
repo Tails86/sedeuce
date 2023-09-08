@@ -40,6 +40,23 @@ class FakeStdIn:
 
 class CliTests(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.TemporaryDirectory()
+        with open(os.path.join(cls.tmpdir.name, "file1.txt"), "wb") as fd:
+            fd.write(test_file1.encode())
+
+    def setUp(self):
+        self.old_dir = os.getcwd()
+        os.chdir(self.tmpdir.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmpdir.cleanup()
+
+    def tearDown(self):
+        os.chdir(self.old_dir)
+
     def test_no_substitute_no_match(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
             patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
@@ -330,6 +347,26 @@ class CliTests(unittest.TestCase):
             sed.main(['2e'])
             in_str = fake_out.buffer.getvalue().decode()
         self.assertEqual(in_str, 'echo a\nb\necho c')
+
+    def test_print_filename_stdin(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn('line 1\nline 2\nline3\n')) \
+        :
+            sed.main(['3F'])
+            in_str = fake_out.buffer.getvalue().decode()
+        self.assertEqual(in_str, 'line 1\nline 2\n-\nline3\n')
+
+    def test_print_filename(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['3F', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:5], [
+            'this is a file',
+            'which contains several lines,',
+            'file1.txt',
+            'and I am am am using',
+            'it to test'
+        ])
 
 
 if __name__ == '__main__':
