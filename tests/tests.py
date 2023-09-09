@@ -290,7 +290,11 @@ class CliTests(unittest.TestCase):
             out_lines = test_file1.split('\n')
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(len(in_lines), len(out_lines) + 1)
-        self.assertEqual(in_lines[9], 'this line is appended after line 9;d')
+        self.assertEqual(in_lines[8:11], [
+            'dsfklaslkdjfa sedf;l asjd',
+            'this line is appended after line 9;d',
+            'fasjd f ;8675309'
+        ])
 
     def test_append_with_slash(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
@@ -300,7 +304,11 @@ class CliTests(unittest.TestCase):
             out_lines = test_file1.split('\n')
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(len(in_lines), len(out_lines) + 1)
-        self.assertEqual(in_lines[9], '    this line is appended after line 9')
+        self.assertEqual(in_lines[8:11], [
+            'dsfklaslkdjfa sedf;l asjd',
+            '    this line is appended after line 9',
+            'fasjd f ;8675309'
+        ])
 
     def test_replace(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
@@ -463,7 +471,34 @@ class CliTests(unittest.TestCase):
             'it to test'
         ])
 
+    def test_insert(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            # Semicolon is not an end command char - only \n is
+            sed.main(['8i    this line is inserted before line 8;d'])
+            out_lines = test_file1.split('\n')
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(len(in_lines), len(out_lines) + 1)
+        self.assertEqual(in_lines[6:9], [
+            'here is some junk text',
+            'this line is inserted before line 8;d',
+            'dlkjfkldsjf'
+        ])
 
+    def test_insert_with_slash(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            sed.main(['8i\    this line is inserted before line 8'])
+            out_lines = test_file1.split('\n')
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(len(in_lines), len(out_lines) + 1)
+        self.assertEqual(in_lines[6:9], [
+            'here is some junk text',
+            '    this line is inserted before line 8',
+            'dlkjfkldsjf'
+        ])
 
 if __name__ == '__main__':
     unittest.main()

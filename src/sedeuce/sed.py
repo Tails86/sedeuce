@@ -640,6 +640,7 @@ class AppendCommand(SedCommand):
         if not dat.bytes.endswith(dat.newline):
             dat.bytes += dat.newline
         dat.bytes += self._append_value + dat.newline
+        return True
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -785,6 +786,8 @@ class ExecuteCommand(SedCommand):
         else:
             raise SedParsingException('Not an execute sequence')
 
+
+
 class FileCommand(SedCommand):
     COMMAND_CHAR = 'F'
 
@@ -802,11 +805,7 @@ class FileCommand(SedCommand):
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
-            better_be_empty = s.str_from_mark().strip()
-            if better_be_empty:
-                raise ValueError('extra characters after command')
+            s.advance_past()
             return FileCommand(condition)
         else:
             raise SedParsingException('Not a file sequence')
@@ -828,11 +827,7 @@ class SetHoldspace(SedCommand):
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
-            better_be_empty = s.str_from_mark().strip()
-            if better_be_empty:
-                raise ValueError('extra characters after command')
+            s.advance_past()
             return SetHoldspace(condition)
         else:
             raise SedParsingException('Not a set holdspace sequence')
@@ -857,11 +852,7 @@ class AppendHoldspace(SedCommand):
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
-            better_be_empty = s.str_from_mark().strip()
-            if better_be_empty:
-                raise ValueError('extra characters after command')
+            s.advance_past()
             return AppendHoldspace(condition)
         else:
             raise SedParsingException('Not an append holdspace sequence')
@@ -886,11 +877,7 @@ class SetFromHoldspace(SedCommand):
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
-            better_be_empty = s.str_from_mark().strip()
-            if better_be_empty:
-                raise ValueError('extra characters after command')
+            s.advance_past()
             return SetFromHoldspace(condition)
         else:
             raise SedParsingException('Not a set from holdspace sequence')
@@ -915,14 +902,42 @@ class AppendFromHoldspace(SedCommand):
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
-            s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
-            better_be_empty = s.str_from_mark().strip()
-            if better_be_empty:
-                raise ValueError('extra characters after command')
+            s.advance_past()
             return AppendFromHoldspace(condition)
         else:
             raise SedParsingException('Not an append from holdspace sequence')
+
+class InsertCommand(SedCommand):
+    COMMAND_CHAR = 'i'
+
+    def __init__(self, condition: SedCondition, insert_value):
+        super().__init__(condition)
+        if isinstance(insert_value, str):
+            self._insert_value = insert_value.encode()
+        else:
+            self._insert_value = insert_value
+
+    def _handle(self, dat:WorkingData) -> bool:
+        dat.bytes = self._insert_value + dat.newline + dat.bytes
+        return True
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            if len(s) > 0 and s[0] == '\\':
+                s.advance(1)
+            else:
+                s.advance_past()
+            s.mark()
+            # Semicolons are considered part of the append string
+            s.advance_end()
+            return InsertCommand(condition, s.str_from_mark())
+        else:
+            raise SedParsingException('Not an insert sequence')
 
 class Label(SedCommand):
     COMMAND_CHAR = ':'
@@ -959,6 +974,7 @@ SED_COMMANDS = {
     AppendHoldspace.COMMAND_CHAR: AppendHoldspace,
     SetFromHoldspace.COMMAND_CHAR: SetFromHoldspace,
     AppendFromHoldspace.COMMAND_CHAR: AppendFromHoldspace,
+    InsertCommand.COMMAND_CHAR: InsertCommand,
     Label.COMMAND_CHAR: Label
 }
 
