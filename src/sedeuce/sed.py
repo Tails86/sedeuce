@@ -363,10 +363,51 @@ class WorkingData:
     def __init__(self) -> None:
         self.newline = b'\n'
         self.file_name = ''
+        self.out_file = sys.stdout.buffer
         self.line_number = 0
-        self.bytes = b''
+        self.modification_detected = False
+        self.insert_space = None
+        self._pattern_space = b''
+        self.append_space = None
         self.jump_to = None
         self.holdspace = b''
+
+    def initialize_pattern_space(self, b:bytes, line_num:int):
+        self.line_number = line_num
+        self._pattern_space = b
+        self.modification_detected = False
+        self.insert_space = None
+        self.append_space = None
+
+    def insert(self, i:bytes):
+        # Append to insert space
+        if self.insert_space is None:
+            self.insert_space = i
+        else:
+            self.insert_space += self.newline + i
+        self.modification_detected = True
+
+    @property
+    def pattern_space(self):
+        return self._pattern_space
+
+    @pattern_space.setter
+    def pattern_space(self, b:bytes):
+        self._pattern_space = b
+        self.modification_detected = True
+
+    def append(self, a:bytes):
+        # Append to append space
+        if self.append_space is None:
+            self.append_space = a
+        else:
+            self.append_space += self.newline + a
+        self.modification_detected = True
+
+    def print_bytes(self, b:bytes):
+        self.out_file.write(b)
+        self.out_file.flush()
+        self.modification_detected = True
 
 class SedCondition:
     def is_match(self, dat:WorkingData) -> bool:
@@ -421,7 +462,7 @@ class RegexSedCondition(SedCondition):
             self._pattern = self._pattern.encode()
 
     def is_match(self, dat: WorkingData) -> bool:
-        return (re.match(self._pattern, dat.bytes) is not None)
+        return (re.match(self._pattern, dat.pattern_space) is not None)
 
     @staticmethod
     def from_string(s:StringParser):
@@ -442,19 +483,12 @@ class SedCommand:
         self._condition = condition
         self.label = None
 
-    def handle(self, dat:WorkingData) -> bool:
+    def handle(self, dat:WorkingData) -> None:
         if self._condition is None or self._condition.is_match(dat):
-            return self._handle(dat)
-        else:
-            return False
+            self._handle(dat)
 
-    @staticmethod
-    def _print_bytes(b:bytes):
-        sys.stdout.buffer.write(b)
-        sys.stdout.buffer.flush()
-
-    def _handle(self, dat:WorkingData) -> bool:
-        return False
+    def _handle(self, dat:WorkingData) -> None:
+        pass
 
 class SubstituteCommand(SedCommand):
     COMMAND_CHAR = 's'
@@ -464,6 +498,7 @@ class SubstituteCommand(SedCommand):
         find_pattern = _pattern_escape_invert(find_pattern, '+?|{}()')
         if isinstance(find_pattern, str):
             find_pattern = find_pattern.encode()
+        # TODO: The $ character should correspond to newline character
         self._find_bytes = find_pattern
         self._only_first_match = self._find_bytes.startswith(b'^')
         # TODO: implement special sequences using replace callback instead?
@@ -512,19 +547,19 @@ class SubstituteCommand(SedCommand):
 
     def _match_made(self, dat:WorkingData):
         if self.print_matched_lines:
-            self._print_bytes(dat.bytes)
+            dat.print_bytes(dat.pattern_space)
         if self.matched_file is not None:
-            self.matched_file.write(dat.bytes)
+            self.matched_file.write(dat.pattern_space)
             self.matched_file.flush()
 
-    def _handle(self, dat:WorkingData) -> bool:
+    def _handle(self, dat:WorkingData) -> None:
         # Determine what nth match is based on self data
         nth_match = self.nth_match
         if self._only_first_match:
             if self.nth_match is not None:
                 if (self.nth_match == 0 and not self.global_replace) or self.nth_match > 1:
                     # No way to ever match this
-                    return False
+                    return
                 else:
                     # Only first match is valid
                     nth_match = 1
@@ -535,7 +570,7 @@ class SubstituteCommand(SedCommand):
         # This is a pain in the ass - manually go to each match in order to handle all features
         match_idx = 0
         offset = 0
-        next_chunk = dat.bytes
+        next_chunk = dat.pattern_space
         match = re.search(self._find, next_chunk)
         matched = False
         while match:
@@ -554,7 +589,7 @@ class SubstituteCommand(SedCommand):
                         new_dat = new_dat[:-1]
                 else:
                     new_dat = new_str
-                dat.bytes = dat.bytes[0:start] + new_dat + dat.bytes[end:]
+                dat.pattern_space = dat.pattern_space[0:start] + new_dat + dat.pattern_space[end:]
                 if nth_match is not None and not self.global_replace:
                     # All done
                     break
@@ -568,12 +603,12 @@ class SubstituteCommand(SedCommand):
             # If we matched while the previous chunk was empty, exit now to prevent infinite loop
             if not next_chunk:
                 break
-            next_chunk = dat.bytes[offset:]
+            next_chunk = dat.pattern_space[offset:]
             match = re.search(self._find, next_chunk)
             match_idx += 1
         if matched:
             self._match_made(dat)
-        return matched
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -636,11 +671,8 @@ class AppendCommand(SedCommand):
         else:
             self._append_value = append_value
 
-    def _handle(self, dat:WorkingData) -> bool:
-        if not dat.bytes.endswith(dat.newline):
-            dat.bytes += dat.newline
-        dat.bytes += self._append_value + dat.newline
-        return True
+    def _handle(self, dat:WorkingData) -> None:
+        dat.append(self._append_value)
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -667,10 +699,10 @@ class BranchCommand(SedCommand):
         super().__init__(condition)
         self._branch_name = branch_name
 
-    def _handle(self, dat:WorkingData) -> bool:
+    def _handle(self, dat:WorkingData) -> None:
         if self._branch_name:
             dat.jump_to = self._branch_name
-        return False
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -697,12 +729,12 @@ class ReplaceCommand(SedCommand):
         else:
             self._replace = replace
 
-    def _handle(self, dat:WorkingData) -> bool:
-        add_newline = dat.bytes.endswith(dat.newline)
-        dat.bytes = self._replace
+    def _handle(self, dat:WorkingData) -> None:
+        add_newline = dat.pattern_space.endswith(dat.newline)
+        dat.pattern_space = self._replace
         if add_newline:
-            dat.bytes += dat.newline
-        return True
+            dat.pattern_space += dat.newline
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -724,29 +756,29 @@ class ReplaceCommand(SedCommand):
             raise SedParsingException('Not a replace sequence')
 
 class DeleteToNewlineCommand(SedCommand):
-    # There doesn't seem to be a difference between these two
+    # TODO: there seems to be a subtle difference between these two
     COMMAND_CHAR = 'd'
     COMMAND_CHAR2 = 'D'
 
     def __init__(self, condition: SedCondition):
         super().__init__(condition)
 
-    def _handle(self, dat:WorkingData) -> bool:
-        pos = dat.bytes.find(dat.newline)
+    def _handle(self, dat:WorkingData) -> None:
+        pos = dat.pattern_space.find(dat.newline)
         if pos >= 0:
-            dat.bytes = dat.bytes[pos+1:]
+            dat.pattern_space = dat.pattern_space[pos+1:]
         else:
-            dat.bytes = b''
+            dat.pattern_space = b''
         dat.jump_to = -1 # jump to end
         self._last_processed_line = dat.line_number
-        return True
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_past() and (s[0] == __class__.COMMAND_CHAR or s[0] == __class__.COMMAND_CHAR2):
+        if s.advance_past() and s[0] in __class__.COMMAND_CHAR + __class__.COMMAND_CHAR2:
             s.advance(1)
             s.advance_past()
             return DeleteToNewlineCommand(condition)
@@ -760,16 +792,16 @@ class ExecuteCommand(SedCommand):
         super().__init__(condition)
         self.cmd = cmd
 
-    def _handle(self, dat: WorkingData) -> bool:
+    def _handle(self, dat:WorkingData) -> None:
         if self.cmd:
             # Execute the command
             proc_output = subprocess.run(self.cmd, shell=True, capture_output=True)
-            dat.bytes = proc_output.stdout + dat.bytes
+            dat.pattern_space = proc_output.stdout + dat.pattern_space
         else:
             # Execute what's in the pattern space and replace the pattern space with the output
-            proc_output = subprocess.run(dat.bytes.decode(), shell=True, capture_output=True)
-            dat.bytes = proc_output.stdout
-        return True
+            proc_output = subprocess.run(dat.pattern_space.decode(), shell=True, capture_output=True)
+            dat.pattern_space = proc_output.stdout
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -786,17 +818,15 @@ class ExecuteCommand(SedCommand):
         else:
             raise SedParsingException('Not an execute sequence')
 
-
-
 class FileCommand(SedCommand):
     COMMAND_CHAR = 'F'
 
     def __init__(self, condition: SedCondition) -> None:
         super().__init__(condition)
 
-    def _handle(self, dat: WorkingData) -> bool:
-        dat.bytes = dat.file_name.encode() + dat.newline + dat.bytes
-        return True
+    def _handle(self, dat:WorkingData) -> None:
+        dat.print_bytes(dat.file_name.encode() + dat.newline)
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -816,9 +846,9 @@ class SetHoldspace(SedCommand):
     def __init__(self, condition: SedCondition) -> None:
         super().__init__(condition)
 
-    def _handle(self, dat: WorkingData) -> bool:
-        dat.holdspace = dat.bytes
-        return False
+    def _handle(self, dat:WorkingData) -> None:
+        dat.holdspace = dat.pattern_space
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -838,12 +868,12 @@ class AppendHoldspace(SedCommand):
     def __init__(self, condition: SedCondition) -> None:
         super().__init__(condition)
 
-    def _handle(self, dat: WorkingData) -> bool:
+    def _handle(self, dat:WorkingData) -> None:
         holdspace = dat.holdspace
         if not holdspace.endswith(dat.newline):
             holdspace += dat.newline
-        dat.holdspace = holdspace + dat.bytes
-        return False
+        dat.holdspace = holdspace + dat.pattern_space
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -863,12 +893,12 @@ class SetFromHoldspace(SedCommand):
     def __init__(self, condition: SedCondition) -> None:
         super().__init__(condition)
 
-    def _handle(self, dat: WorkingData) -> bool:
+    def _handle(self, dat:WorkingData) -> None:
         holdspace = dat.holdspace
         if not holdspace.endswith(dat.newline):
             holdspace += dat.newline
-        dat.bytes = holdspace
-        return True
+        dat.pattern_space = holdspace
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -888,12 +918,8 @@ class AppendFromHoldspace(SedCommand):
     def __init__(self, condition: SedCondition) -> None:
         super().__init__(condition)
 
-    def _handle(self, dat: WorkingData) -> bool:
-        holdspace = dat.holdspace
-        if not holdspace.endswith(dat.newline):
-            holdspace += dat.newline
-        dat.bytes = dat.bytes + holdspace
-        return True
+    def _handle(self, dat:WorkingData) -> None:
+        dat.append(dat.holdspace)
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -917,9 +943,9 @@ class InsertCommand(SedCommand):
         else:
             self._insert_value = insert_value
 
-    def _handle(self, dat:WorkingData) -> bool:
-        dat.bytes = self._insert_value + dat.newline + dat.bytes
-        return True
+    def _handle(self, dat:WorkingData) -> None:
+        dat.insert(self._insert_value)
+        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -938,6 +964,51 @@ class InsertCommand(SedCommand):
             return InsertCommand(condition, s.str_from_mark())
         else:
             raise SedParsingException('Not an insert sequence')
+
+class UnambiguousPrint(SedCommand):
+    COMMAND_CHAR = 'l'
+    CONVERSION_DICT = {
+        ord('\a'): list(b'\\a'),
+        ord('\b'): list(b'\\b'),
+        ord('\t'): list(b'\\t'),
+        ord('\v'): list(b'\\v'),
+        ord('\f'): list(b'\\f'),
+        ord('\r'): list(b'\\r'),
+        ord('\\'): list(b'\\\\')
+    }
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    @staticmethod
+    def _convert_byte(b:int, newline_char:bytes):
+        if b == ord(newline_char):
+            return [ord('$'), b]
+        elif b in __class__.CONVERSION_DICT:
+            return __class__.CONVERSION_DICT[b]
+        elif b < 32 or b > 126:
+            return list(b'\\' + '{:o}'.format(b).encode())
+        else:
+            return [b]
+
+    def _handle(self, dat: WorkingData) -> None:
+        the_bytes = bytes([b for a in dat.pattern_space for b in __class__._convert_byte(a, dat.newline)])
+        # Need to add $ if the current line does not end with newline
+        if not dat.pattern_space.endswith(dat.newline):
+            the_bytes += b'$'
+        dat.print_bytes(the_bytes)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return UnambiguousPrint(condition)
+        else:
+            raise SedParsingException('Not an unambiguous print sequence')
 
 class Label(SedCommand):
     COMMAND_CHAR = ':'
@@ -975,6 +1046,7 @@ SED_COMMANDS = {
     SetFromHoldspace.COMMAND_CHAR: SetFromHoldspace,
     AppendFromHoldspace.COMMAND_CHAR: AppendFromHoldspace,
     InsertCommand.COMMAND_CHAR: InsertCommand,
+    UnambiguousPrint.COMMAND_CHAR: UnambiguousPrint,
     Label.COMMAND_CHAR: Label
 }
 
@@ -1085,20 +1157,20 @@ class Sed:
             if self.in_place and not isinstance(file, StdinIterable):
                 # Write to temporary file to be copied to target when it changes
                 tmp_file = tempfile.NamedTemporaryFile(mode='wb')
-                out_file = tmp_file
+                dat.out_file = tmp_file
             else:
                 tmp_file = None
-                out_file = sys.stdout.buffer
+                dat.out_file = sys.stdout.buffer
 
             for line in file:
                 line_num += 1
-                dat.line_number = line_num
-                dat.bytes = line
+                dat.initialize_pattern_space(line, line_num)
                 i = 0
                 while i < len(self._commands):
                     command = self._commands[i]
                     i += 1
-                    if command.handle(dat):
+                    command.handle(dat)
+                    if dat.modification_detected:
                         file_changed = True
                     # Command may set jump_to when we need to jump to another command
                     if dat.jump_to is not None:
@@ -1120,9 +1192,18 @@ class Sed:
                                     break
                             if i < 0:
                                 raise SedParsingException(f"can't find label for jump to `{jump_to}'")
-                # Write the line to destination
-                out_file.write(dat.bytes)
-                out_file.flush()
+                # Write the data to destination
+                if dat.insert_space is not None:
+                    dat.print_bytes(dat.insert_space)
+                    if not dat.insert_space.endswith(dat.newline):
+                        dat.print_bytes(dat.newline)
+                dat.print_bytes(dat.pattern_space)
+                if dat.append_space is not None:
+                    if dat.pattern_space and not dat.pattern_space.endswith(dat.newline):
+                        dat.print_bytes(dat.newline)
+                    dat.print_bytes(dat.append_space)
+                    if not dat.append_space.endswith(dat.newline):
+                        dat.print_bytes(dat.newline)
 
             if file_changed and tmp_file:
                 # Write data from temp file to destination

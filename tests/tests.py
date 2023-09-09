@@ -3,7 +3,7 @@
 import os
 import sys
 import unittest
-from io import BytesIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 import tempfile
 
@@ -499,6 +499,45 @@ class CliTests(unittest.TestCase):
             '    this line is inserted before line 8',
             'dlkjfkldsjf'
         ])
+
+    def test_unambiguous_print(self):
+        string = (
+            ' \t\r\n\v\f\u0020\n\u00A0\n\u1680\u2000\u2001\u2002\u2003\u2004'
+            '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000'
+            '\a\b\'\"?hello \\'
+        )
+
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(string)) \
+        :
+            sed.main(['l;d'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            ' \\t\\r$',
+            '\\v\\f $',
+            '\\302\\240$',
+            '\\341\\232\\200\\342\\200\\200\\342\\200\\201\\342\\200\\202\\342\\200\\203\\342\\200'
+            '\\204\\342\\200\\205\\342\\200\\206\\342\\200\\207\\342\\200\\210\\342\\200\\211\\342'
+            '\\200\\212\\342\\200\\257\\342\\201\\237\\343\\200\\200\\a\\b\'"?hello \\\\$'
+        ])
+
+
+
+
+
+
+    def test_set_single_char_commands_failure_extra_chars(self):
+        # This should really be a parametrized test, but I'm lazy...
+        single_char_commands = 'dDhHgGFl'
+        for c in single_char_commands:
+            with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+                patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+            :
+                sed.main(['1{}extra'.format(c), 'file1.txt'])
+                in_dat = fake_out.buffer.getvalue().decode()
+                in_err = fake_err.getvalue()
+            self.assertEqual(in_dat, '')
+            self.assertEqual(in_err, 'sedeuce: Error at expression #1, char 3: extra characters after command\n')
 
 if __name__ == '__main__':
     unittest.main()
