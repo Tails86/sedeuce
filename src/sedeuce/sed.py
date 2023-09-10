@@ -48,6 +48,11 @@ class SedParsingException(Exception):
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
 
+class SedQuitException(Exception):
+    def __init__(self, exit_code:int) -> None:
+        super().__init__()
+        self.exit_code = exit_code
+
 def _pattern_escape_invert(pattern, chars):
     for char in chars:
         escaped_char = '\\' + char
@@ -1190,6 +1195,64 @@ class PrintToNewlineCommand(SedCommand):
         else:
             raise SedParsingException('Not a print to newline command sequence')
 
+class QuitCommand(SedCommand):
+    COMMAND_CHAR = 'q'
+
+    def __init__(self, condition: SedCondition, exit_code=0) -> None:
+        super().__init__(condition)
+        self.exit_code = exit_code
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat.flush_all_data()
+        raise SedQuitException(self.exit_code)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            s.advance_past(NUMBER_CHARS)
+            exit_code_str = s.str_from_mark()
+            if exit_code_str:
+                return QuitCommand(condition, int(exit_code_str))
+            else:
+                return QuitCommand(condition)
+        else:
+            raise SedParsingException('Not a quit command sequence')
+
+class QuitWithoutPrintCommand(SedCommand):
+    COMMAND_CHAR = 'Q'
+
+    def __init__(self, condition: SedCondition, exit_code=0) -> None:
+        super().__init__(condition)
+        self.exit_code = exit_code
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat._flush_insert_data() # Only flush insert data before quitting
+        raise SedQuitException(self.exit_code)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            s.advance_past(NUMBER_CHARS)
+            exit_code_str = s.str_from_mark()
+            if exit_code_str:
+                return QuitWithoutPrintCommand(condition, int(exit_code_str))
+            else:
+                return QuitWithoutPrintCommand(condition)
+        else:
+            raise SedParsingException('Not a quit without print command sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -1231,6 +1294,8 @@ SED_COMMANDS = {
     AppendNextCommand.COMMAND_CHAR: AppendNextCommand,
     PrintCommand.COMMAND_CHAR: PrintCommand,
     PrintToNewlineCommand.COMMAND_CHAR: PrintToNewlineCommand,
+    QuitCommand.COMMAND_CHAR: QuitCommand,
+    QuitWithoutPrintCommand.COMMAND_CHAR: QuitWithoutPrintCommand,
     Label.COMMAND_CHAR: Label
 }
 
@@ -1349,7 +1414,12 @@ class Sed:
                 while i < len(self._commands):
                     command = self._commands[i]
                     i += 1
-                    command.handle(dat)
+
+                    try:
+                        command.handle(dat)
+                    except SedQuitException as ex:
+                        return ex.exit_code
+
                     if dat.pattern_space is None:
                         # This will happen if a next command was used, and there is nothing else to read
                         break
@@ -1388,6 +1458,7 @@ class Sed:
                 os.remove(file_name)
                 shutil.copy2(tmp_file.name, file_name)
                 del tmp_file
+        return 0
 
 def parse_args(cliargs):
     parser = argparse.ArgumentParser(
@@ -1451,9 +1522,10 @@ def main(cliargs):
             sed.in_place = True
             if isinstance(args.in_place, str):
                 sed.in_place_backup_suffix = args.in_place
-        sed.execute()
+        return sed.execute()
     except Exception as ex:
         if args.verbose:
             raise ex
         else:
             print(f'{PACKAGE_NAME}: {ex}', file=sys.stderr)
+            return 1

@@ -579,6 +579,40 @@ class CliTests(unittest.TestCase):
             'blah'
         ])
 
+    def test_quit_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            rv = sed.main(['aworld\nihello\n3q321', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'hello',
+            'this is a file',
+            'world',
+            'hello',
+            'which contains several lines,',
+            'world',
+            'hello',
+            'and I am am am using',
+            'world',
+            ''
+        ])
+        self.assertEqual(rv, 321)
+
+    def test_quit_without_print_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            rv = sed.main(['aworld\nihello\n3Q', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'hello',
+            'this is a file',
+            'world',
+            'hello',
+            'which contains several lines,',
+            'world',
+            'hello',
+            ''
+        ])
+        self.assertEqual(rv, 0)
+
 
 
 
