@@ -536,8 +536,18 @@ class CliTests(unittest.TestCase):
             'it to test'
         ])
 
-
-
+    def test_append_next_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['3aworld\n3ihello\n3,5N\n3d', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:6], [
+            'this is a file',
+            'which contains several lines,',
+            'hello',
+            'world',
+            'and I am am am using',
+            'it to test'
+        ])
 
 
 

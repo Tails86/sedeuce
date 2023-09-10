@@ -383,14 +383,8 @@ class WorkingData:
     def file_name(self):
         return self.in_file.name
 
-    def reset_pattern(self):
-        self._pattern_space = None
-        self.jump_to = None
-        self.insert_space = None
-        self.append_space = None
-
     def next_line(self) -> bool:
-        self.flush_pattern()
+        self.flush_all_data()
 
         if not self.in_file_iter:
             return False
@@ -401,6 +395,27 @@ class WorkingData:
             self.in_file_iter = None
             return False
         else:
+            self.line_number += 1
+            return True
+
+    def append_next_line(self) -> bool:
+        if not self.in_file_iter:
+            self.flush_all_data()
+            return False
+
+        try:
+            append_pattern = next(self.in_file_iter)
+        except StopIteration:
+            self.flush_all_data()
+            self.in_file_iter = None
+            return False
+        else:
+            # Flush out insert and append data then append the pattern space
+            self._flush_insert_data()
+            self._flush_append_data()
+            if self._pattern_space and not self._pattern_space.endswith(self.newline):
+                self._pattern_space += self.newline
+            self._pattern_space += append_pattern
             self.line_number += 1
             return True
 
@@ -433,35 +448,37 @@ class WorkingData:
         self.out_file.write(b)
         self.out_file.flush()
 
+    def _flush_insert_data(self):
+        if self.insert_space is not None:
+            self.modification_detected = True
+            self._write(self.insert_space)
+            if not self.insert_space.endswith(self.newline):
+                self._write(self.newline)
+        self.insert_space = None
+
+    def _flush_append_data(self):
+        if self.append_space is not None:
+            self.modification_detected = True
+            if self.pattern_space and not self.pattern_space.endswith(self.newline):
+                self._write(self.newline)
+            self._write(self.append_space)
+            if not self.append_space.endswith(self.newline):
+                self._write(self.newline)
+        self.append_space = None
+
     def print_bytes(self, b:bytes):
         self._write(b)
         self.modification_detected = True
 
-    def flush_pattern(self):
-        # Only flush if there is something to flush
-        # Pattern space will only be None if no line has been loaded yet
-        if self._pattern_space is not None:
-            # Write insert data
-            if self.insert_space is not None:
-                self.modification_detected = True
-                self._write(self.insert_space)
-                if not self.insert_space.endswith(self.newline):
-                    self._write(self.newline)
+    def flush_all_data(self):
+        self._flush_insert_data()
 
+        if self._pattern_space is not None:
             # Write the modified pattern space
             self._write(self.pattern_space)
+            self._pattern_space = None
 
-            # Write append data
-            if self.append_space is not None:
-                self.modification_detected = True
-                if self.pattern_space and not self.pattern_space.endswith(self.newline):
-                    self._write(self.newline)
-                self._write(self.append_space)
-                if not self.append_space.endswith(self.newline):
-                    self._write(self.newline)
-
-        # Reset pattern so the above won't be written again
-        self.reset_pattern()
+        self._flush_append_data()
 
 class SedCondition:
     def is_match(self, dat:WorkingData) -> bool:
@@ -1085,6 +1102,27 @@ class NextCommand(SedCommand):
         else:
             raise SedParsingException('Not a next command sequence')
 
+class AppendNextCommand(SedCommand):
+    COMMAND_CHAR = 'N'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat.append_next_line()
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return AppendNextCommand(condition)
+        else:
+            raise SedParsingException('Not a next command sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -1123,6 +1161,7 @@ SED_COMMANDS = {
     InsertCommand.COMMAND_CHAR: InsertCommand,
     UnambiguousPrint.COMMAND_CHAR: UnambiguousPrint,
     NextCommand.COMMAND_CHAR: NextCommand,
+    AppendNextCommand.COMMAND_CHAR: AppendNextCommand,
     Label.COMMAND_CHAR: Label
 }
 
@@ -1242,8 +1281,11 @@ class Sed:
                     command = self._commands[i]
                     i += 1
                     command.handle(dat)
+                    if dat.pattern_space is None:
+                        # This will happen if a next command was used, and there is nothing else to read
+                        break
                     # Command may set jump_to when we need to jump to another command
-                    if dat.jump_to is not None:
+                    elif dat.jump_to is not None:
                         jump_to = dat.jump_to
                         dat.jump_to = None
                         # jump_to may be an index or label
@@ -1262,7 +1304,10 @@ class Sed:
                                     break
                             if i < 0:
                                 raise SedParsingException(f"can't find label for jump to `{jump_to}'")
-                dat.flush_pattern()
+                dat.flush_all_data()
+
+            # Final pattern flush just in case there was something left
+            dat.flush_all_data()
 
             if dat.modification_detected and tmp_file:
                 # Write data from temp file to destination
