@@ -362,7 +362,8 @@ class SharedFileWriter:
 class WorkingData:
     def __init__(self) -> None:
         self.newline = b'\n'
-        self.file_name = ''
+        self.in_file = None
+        self.in_file_iter = None
         self.out_file = sys.stdout.buffer
         self.line_number = 0
         self.modification_detected = False
@@ -372,12 +373,36 @@ class WorkingData:
         self.jump_to = None
         self.holdspace = b''
 
-    def initialize_pattern_space(self, b:bytes, line_num:int):
-        self.line_number = line_num
-        self._pattern_space = b
+    def set_in_file(self, file:FileIterable):
         self.modification_detected = False
+        self.in_file = file
+        # This will raise an exception if file could not be opened
+        self.in_file_iter = iter(self.in_file)
+
+    @property
+    def file_name(self):
+        return self.in_file.name
+
+    def reset_pattern(self):
+        self._pattern_space = None
+        self.jump_to = None
         self.insert_space = None
         self.append_space = None
+
+    def next_line(self) -> bool:
+        self.flush_pattern()
+
+        if not self.in_file_iter:
+            return False
+
+        try:
+            self._pattern_space = next(self.in_file_iter)
+        except StopIteration:
+            self.in_file_iter = None
+            return False
+        else:
+            self.line_number += 1
+            return True
 
     def insert(self, i:bytes):
         # Append to insert space
@@ -404,10 +429,39 @@ class WorkingData:
             self.append_space += self.newline + a
         self.modification_detected = True
 
-    def print_bytes(self, b:bytes):
+    def _write(self, b:bytes):
         self.out_file.write(b)
         self.out_file.flush()
+
+    def print_bytes(self, b:bytes):
+        self._write(b)
         self.modification_detected = True
+
+    def flush_pattern(self):
+        # Only flush if there is something to flush
+        # Pattern space will only be None if no line has been loaded yet
+        if self._pattern_space is not None:
+            # Write insert data
+            if self.insert_space is not None:
+                self.modification_detected = True
+                self._write(self.insert_space)
+                if not self.insert_space.endswith(self.newline):
+                    self._write(self.newline)
+
+            # Write the modified pattern space
+            self._write(self.pattern_space)
+
+            # Write append data
+            if self.append_space is not None:
+                self.modification_detected = True
+                if self.pattern_space and not self.pattern_space.endswith(self.newline):
+                    self._write(self.newline)
+                self._write(self.append_space)
+                if not self.append_space.endswith(self.newline):
+                    self._write(self.newline)
+
+        # Reset pattern so the above won't be written again
+        self.reset_pattern()
 
 class SedCondition:
     def is_match(self, dat:WorkingData) -> bool:
@@ -430,7 +484,7 @@ class RangeSedCondition(SedCondition):
         else:
             self._end_line = start_line
 
-    def is_match(self, dat: WorkingData) -> bool:
+    def is_match(self, dat:WorkingData) -> bool:
         return dat.line_number >= self._start_line and dat.line_number <= self._end_line
 
     @staticmethod
@@ -461,7 +515,7 @@ class RegexSedCondition(SedCondition):
         if isinstance(self._pattern, str):
             self._pattern = self._pattern.encode()
 
-    def is_match(self, dat: WorkingData) -> bool:
+    def is_match(self, dat:WorkingData) -> bool:
         return (re.match(self._pattern, dat.pattern_space) is not None)
 
     @staticmethod
@@ -991,7 +1045,7 @@ class UnambiguousPrint(SedCommand):
         else:
             return [b]
 
-    def _handle(self, dat: WorkingData) -> None:
+    def _handle(self, dat:WorkingData) -> None:
         the_bytes = bytes([b for a in dat.pattern_space for b in __class__._convert_byte(a, dat.newline)])
         # Need to add $ if the current line does not end with newline
         if not dat.pattern_space.endswith(dat.newline):
@@ -1009,6 +1063,27 @@ class UnambiguousPrint(SedCommand):
             return UnambiguousPrint(condition)
         else:
             raise SedParsingException('Not an unambiguous print sequence')
+
+class NextCommand(SedCommand):
+    COMMAND_CHAR = 'n'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat.next_line()
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return NextCommand(condition)
+        else:
+            raise SedParsingException('Not a next command sequence')
 
 class Label(SedCommand):
     COMMAND_CHAR = ':'
@@ -1047,6 +1122,7 @@ SED_COMMANDS = {
     AppendFromHoldspace.COMMAND_CHAR: AppendFromHoldspace,
     InsertCommand.COMMAND_CHAR: InsertCommand,
     UnambiguousPrint.COMMAND_CHAR: UnambiguousPrint,
+    NextCommand.COMMAND_CHAR: NextCommand,
     Label.COMMAND_CHAR: Label
 }
 
@@ -1149,10 +1225,8 @@ class Sed:
 
         dat = WorkingData()
         dat.newline = self.newline
-        line_num = 0
         for file in files:
-            file_changed = False
-            dat.file_name = file.name
+            dat.set_in_file(file)
 
             if self.in_place and not isinstance(file, StdinIterable):
                 # Write to temporary file to be copied to target when it changes
@@ -1162,16 +1236,12 @@ class Sed:
                 tmp_file = None
                 dat.out_file = sys.stdout.buffer
 
-            for line in file:
-                line_num += 1
-                dat.initialize_pattern_space(line, line_num)
+            while dat.next_line():
                 i = 0
                 while i < len(self._commands):
                     command = self._commands[i]
                     i += 1
                     command.handle(dat)
-                    if dat.modification_detected:
-                        file_changed = True
                     # Command may set jump_to when we need to jump to another command
                     if dat.jump_to is not None:
                         jump_to = dat.jump_to
@@ -1192,20 +1262,9 @@ class Sed:
                                     break
                             if i < 0:
                                 raise SedParsingException(f"can't find label for jump to `{jump_to}'")
-                # Write the data to destination
-                if dat.insert_space is not None:
-                    dat.print_bytes(dat.insert_space)
-                    if not dat.insert_space.endswith(dat.newline):
-                        dat.print_bytes(dat.newline)
-                dat.print_bytes(dat.pattern_space)
-                if dat.append_space is not None:
-                    if dat.pattern_space and not dat.pattern_space.endswith(dat.newline):
-                        dat.print_bytes(dat.newline)
-                    dat.print_bytes(dat.append_space)
-                    if not dat.append_space.endswith(dat.newline):
-                        dat.print_bytes(dat.newline)
+                dat.flush_pattern()
 
-            if file_changed and tmp_file:
+            if dat.modification_detected and tmp_file:
                 # Write data from temp file to destination
                 tmp_file.flush()
                 file_name = os.path.abspath(file.name)

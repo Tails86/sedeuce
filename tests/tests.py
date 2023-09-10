@@ -521,6 +521,22 @@ class CliTests(unittest.TestCase):
             '\\200\\212\\342\\200\\257\\342\\201\\237\\343\\200\\200\\a\\b\'"?hello \\\\$'
         ])
 
+    def test_next_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            sed.main(['ahello\nn'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:6], [
+            'this is a file',
+            'hello',
+            'which contains several lines,',
+            'and I am am am using',
+            'hello',
+            'it to test'
+        ])
+
+
 
 
 
