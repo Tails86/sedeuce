@@ -549,12 +549,42 @@ class CliTests(unittest.TestCase):
             'it to test'
         ])
 
+    def test_print_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['ablah\n3p', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:8], [
+            'this is a file',
+            'blah',
+            'which contains several lines,',
+            'blah',
+            'and I am am am using',
+            'and I am am am using',
+            'blah',
+            'it to test'
+        ])
+
+    def test_print_to_newline_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['ablah\n3N;4P;4d', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:8], [
+            'this is a file',
+            'blah',
+            'which contains several lines,',
+            'blah',
+            'blah',
+            'and I am am am using',
+            'sed for a while',
+            'blah'
+        ])
+
 
 
 
     def test_set_single_char_commands_failure_extra_chars(self):
         # This should really be a parametrized test, but I'm lazy...
-        single_char_commands = 'dDhHgGFl'
+        single_char_commands = 'dDhHgGFlnNpP'
         for c in single_char_commands:
             with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
                 patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \

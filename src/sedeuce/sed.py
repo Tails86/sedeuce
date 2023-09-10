@@ -826,10 +826,30 @@ class ReplaceCommand(SedCommand):
         else:
             raise SedParsingException('Not a replace sequence')
 
-class DeleteToNewlineCommand(SedCommand):
-    # TODO: there seems to be a subtle difference between these two
+class DeleteCommand(SedCommand):
     COMMAND_CHAR = 'd'
-    COMMAND_CHAR2 = 'D'
+
+    def __init__(self, condition: SedCondition):
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat.pattern_space = b''
+        dat.jump_to = -1 # jump to end
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return DeleteCommand(condition)
+        else:
+            raise SedParsingException('Not a delete command')
+
+class DeleteToNewlineCommand(SedCommand):
+    COMMAND_CHAR = 'D'
 
     def __init__(self, condition: SedCondition):
         super().__init__(condition)
@@ -838,9 +858,10 @@ class DeleteToNewlineCommand(SedCommand):
         pos = dat.pattern_space.find(dat.newline)
         if pos >= 0:
             dat.pattern_space = dat.pattern_space[pos+1:]
+            dat.jump_to = 0 # jump to beginning
         else:
             dat.pattern_space = b''
-        dat.jump_to = -1 # jump to end
+            dat.jump_to = -1 # jump to end
         self._last_processed_line = dat.line_number
         return
 
@@ -849,12 +870,12 @@ class DeleteToNewlineCommand(SedCommand):
         if isinstance(s, str):
             s = StringParser(s)
 
-        if s.advance_past() and s[0] in __class__.COMMAND_CHAR + __class__.COMMAND_CHAR2:
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
             s.advance(1)
             s.advance_past()
             return DeleteToNewlineCommand(condition)
         else:
-            raise SedParsingException('Not a delete command')
+            raise SedParsingException('Not a delete to newline command')
 
 class ExecuteCommand(SedCommand):
     COMMAND_CHAR = 'e'
@@ -1121,7 +1142,53 @@ class AppendNextCommand(SedCommand):
             s.advance_past()
             return AppendNextCommand(condition)
         else:
-            raise SedParsingException('Not a next command sequence')
+            raise SedParsingException('Not an append next command sequence')
+
+class PrintCommand(SedCommand):
+    COMMAND_CHAR = 'p'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat.print_bytes(dat.pattern_space)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return PrintCommand(condition)
+        else:
+            raise SedParsingException('Not a print command sequence')
+
+class PrintToNewlineCommand(SedCommand):
+    COMMAND_CHAR = 'P'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        loc = dat.pattern_space.find(dat.newline)
+        if loc < 0:
+            dat.print_bytes(dat.pattern_space + dat.newline)
+        else:
+            dat.print_bytes(dat.pattern_space[:loc+1])
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return PrintToNewlineCommand(condition)
+        else:
+            raise SedParsingException('Not a print to newline command sequence')
 
 class Label(SedCommand):
     COMMAND_CHAR = ':'
@@ -1150,8 +1217,8 @@ SED_COMMANDS = {
     AppendCommand.COMMAND_CHAR: AppendCommand,
     BranchCommand.COMMAND_CHAR: BranchCommand,
     ReplaceCommand.COMMAND_CHAR: ReplaceCommand,
+    DeleteCommand.COMMAND_CHAR: DeleteCommand,
     DeleteToNewlineCommand.COMMAND_CHAR: DeleteToNewlineCommand,
-    DeleteToNewlineCommand.COMMAND_CHAR2: DeleteToNewlineCommand,
     ExecuteCommand.COMMAND_CHAR: ExecuteCommand,
     FileCommand.COMMAND_CHAR: FileCommand,
     SetHoldspace.COMMAND_CHAR: SetHoldspace,
@@ -1162,6 +1229,8 @@ SED_COMMANDS = {
     UnambiguousPrint.COMMAND_CHAR: UnambiguousPrint,
     NextCommand.COMMAND_CHAR: NextCommand,
     AppendNextCommand.COMMAND_CHAR: AppendNextCommand,
+    PrintCommand.COMMAND_CHAR: PrintCommand,
+    PrintToNewlineCommand.COMMAND_CHAR: PrintToNewlineCommand,
     Label.COMMAND_CHAR: Label
 }
 
