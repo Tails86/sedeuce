@@ -424,12 +424,16 @@ class WorkingData:
             self.line_number += 1
             return True
 
-    def insert(self, i:bytes):
+    def insert(self, i:bytes, add_newline=True):
         # Append to insert space
         if self.insert_space is None:
             self.insert_space = i
         else:
-            self.insert_space += self.newline + i
+            self.insert_space += i
+
+        if add_newline and not self.insert_space.endswith(self.newline):
+            self.insert_space += self.newline
+
         self.modification_detected = True
 
     @property
@@ -441,12 +445,16 @@ class WorkingData:
         self._pattern_space = b
         self.modification_detected = True
 
-    def append(self, a:bytes):
+    def append(self, a:bytes, add_newline=True):
         # Append to append space
         if self.append_space is None:
             self.append_space = a
         else:
-            self.append_space += self.newline + a
+            self.append_space += a
+
+        if add_newline and not self.append_space.endswith(self.newline):
+            self.append_space += self.newline
+
         self.modification_detected = True
 
     def _write(self, b:bytes):
@@ -457,9 +465,7 @@ class WorkingData:
         if self.insert_space is not None:
             self.modification_detected = True
             self._write(self.insert_space)
-            if not self.insert_space.endswith(self.newline):
-                self._write(self.newline)
-        self.insert_space = None
+            self.insert_space = None
 
     def _flush_append_data(self):
         if self.append_space is not None:
@@ -467,9 +473,7 @@ class WorkingData:
             if self.pattern_space and not self.pattern_space.endswith(self.newline):
                 self._write(self.newline)
             self._write(self.append_space)
-            if not self.append_space.endswith(self.newline):
-                self._write(self.newline)
-        self.append_space = None
+            self.append_space = None
 
     def print_bytes(self, b:bytes):
         self._write(b)
@@ -1253,6 +1257,79 @@ class QuitWithoutPrintCommand(SedCommand):
         else:
             raise SedParsingException('Not a quit without print command sequence')
 
+class AppendFileContents(SedCommand):
+    COMMAND_CHAR = 'r'
+
+    def __init__(self, condition: SedCondition, file_path) -> None:
+        super().__init__(condition)
+        self.file_path = file_path
+
+    def _handle(self, dat:WorkingData) -> None:
+        try:
+            with open(self.file_path, 'rb') as fp:
+                dat.append(fp.read(), add_newline=False)
+        except OSError:
+            # Ignore
+            pass
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            # Semicolons are considered part of the file name string
+            s.advance_end()
+            return AppendFileContents(condition, s.str_from_mark())
+        else:
+            raise SedParsingException('Not an append file contents command sequence')
+
+class AppendLineFromFile(SedCommand):
+    COMMAND_CHAR = 'R'
+
+    def __init__(self, condition: SedCondition, file_path) -> None:
+        super().__init__(condition)
+        self.file_path = file_path
+        self.file_read = False
+        self.file_iter = None
+
+    def _handle(self, dat:WorkingData) -> None:
+        if not self.file_read and self.file_iter is None:
+            auto_file = AutoInputFileIterable(self.file_path, 'rb', dat.newline)
+            try:
+                self.file_iter = iter(auto_file)
+            except OSError:
+                # Ignore file
+                self.file_read = True
+                self.file_iter = None
+
+        if self.file_iter:
+            try:
+                next_line = next(self.file_iter)
+            except StopIteration:
+                self.file_read = True
+                self.file_iter = None
+            else:
+                dat.append(next_line, add_newline=False)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            # Semicolons are considered part of the file name string
+            s.advance_end()
+            return AppendLineFromFile(condition, s.str_from_mark())
+        else:
+            raise SedParsingException('Not an append line from file command sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -1296,6 +1373,8 @@ SED_COMMANDS = {
     PrintToNewlineCommand.COMMAND_CHAR: PrintToNewlineCommand,
     QuitCommand.COMMAND_CHAR: QuitCommand,
     QuitWithoutPrintCommand.COMMAND_CHAR: QuitWithoutPrintCommand,
+    AppendFileContents.COMMAND_CHAR: AppendFileContents,
+    AppendLineFromFile.COMMAND_CHAR: AppendLineFromFile,
     Label.COMMAND_CHAR: Label
 }
 

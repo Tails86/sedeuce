@@ -45,6 +45,8 @@ class CliTests(unittest.TestCase):
         cls.tmpdir = tempfile.TemporaryDirectory()
         with open(os.path.join(cls.tmpdir.name, "file1.txt"), "wb") as fd:
             fd.write(test_file1.encode())
+        with open(os.path.join(cls.tmpdir.name, "numbers.txt"), "wb") as fd:
+            fd.write(b'0\n1\n2\n3\n4\n5\n6\n7\n8\n9')
 
     def setUp(self):
         self.old_dir = os.getcwd()
@@ -613,6 +615,61 @@ class CliTests(unittest.TestCase):
         ])
         self.assertEqual(rv, 0)
 
+    def test_append_file_contents(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['ahello\n1r numbers.txt\naworld\n1rnumbers.txt', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:24], [
+            'this is a file',
+            'hello',
+            '0',
+            '1',
+            '2',
+            '3',
+            '4',
+            '5',
+            '6',
+            '7',
+            '8',
+            '9world',
+            '0',
+            '1',
+            '2',
+            '3',
+            '4',
+            '5',
+            '6',
+            '7',
+            '8',
+            '9which contains several lines,',
+            'hello',
+            'world'
+        ])
+
+    def test_append_file_contents_invalid_file(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['r invalid.txt', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:3], [
+            'this is a file',
+            'which contains several lines,',
+            'and I am am am using'
+        ])
+
+    def test_append_lines_from_file(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['R numbers.txt\nahello\nd', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:6], [
+            '0',
+            'hello',
+            '1',
+            'hello',
+            '2',
+            'hello'
+        ])
 
 
 
