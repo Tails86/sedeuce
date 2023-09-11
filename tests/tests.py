@@ -671,6 +671,19 @@ class CliTests(unittest.TestCase):
             'hello'
         ])
 
+    def test_comment(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['# this; is a ; comment\nahello', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:5], [
+            'this is a file',
+            'hello',
+            'which contains several lines,',
+            'hello',
+            'and I am am am using'
+        ])
+
 
 
     def test_set_single_char_commands_failure_extra_chars(self):

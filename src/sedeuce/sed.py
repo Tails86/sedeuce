@@ -1352,6 +1352,23 @@ class Label(SedCommand):
         else:
             raise SedParsingException('Not a label')
 
+class Comment(SedCommand):
+    COMMAND_CHAR = '#'
+
+    def __init__(self, condition: SedCondition):
+        super().__init__(condition)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance_end()
+            return None
+        else:
+            raise SedParsingException('Not a comment')
+
 SED_COMMANDS = {
     SubstituteCommand.COMMAND_CHAR: SubstituteCommand,
     AppendCommand.COMMAND_CHAR: AppendCommand,
@@ -1375,7 +1392,8 @@ SED_COMMANDS = {
     QuitWithoutPrintCommand.COMMAND_CHAR: QuitWithoutPrintCommand,
     AppendFileContents.COMMAND_CHAR: AppendFileContents,
     AppendLineFromFile.COMMAND_CHAR: AppendLineFromFile,
-    Label.COMMAND_CHAR: Label
+    Label.COMMAND_CHAR: Label,
+    Comment.COMMAND_CHAR: Comment
 }
 
 class Sed:
@@ -1437,17 +1455,26 @@ class Sed:
                         condition = RegexSedCondition.from_string(substr_line)
                     else:
                         condition = None
+
                     if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
                         command_type = SED_COMMANDS.get(substr_line[0], None)
+
                         if command_type is None:
                             raise SedParsingException(f'Invalid command: {substr_line[0]}')
+
                         command = command_type.from_string(condition, substr_line)
+
                         if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
                             raise SedParsingException(f'extra characters after command')
+
                         substr_line.advance_past(WHITESPACE_CHARS + SOMETIMES_END_CMD_CHAR)
-                        self._commands.append(command)
+
+                        if command is not None:
+                            self._commands.append(command)
+
                     elif condition is not None:
                         raise SedParsingException('missing command')
+
                 except SedParsingException as ex:
                     raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.pos+1}: {ex}')
 
