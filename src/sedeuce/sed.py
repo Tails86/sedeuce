@@ -34,6 +34,8 @@ import threading
 __version__ = '0.1.1'
 PACKAGE_NAME = 'sedeuce'
 
+VERSION_PARTS = [int(i) for i in __version__.split('.')]
+
 # sed syntax
 # \n (newline) always separates one command from the next unless proceeded by a slash: \
 # ; usually separates one command from the next, but it depends on the command
@@ -364,6 +366,14 @@ class SharedFileWriter:
                 del __class__.files[self._file_path]
                 self._file.close()
 
+def _filename_to_writer(file_name):
+    if file_name == '/dev/stdout':
+        return sys.stdout.buffer
+    elif file_name == '/dev/stderr':
+        return sys.stderr.buffer
+    else:
+        return SharedFileWriter(file_name, binary=True, append=False)
+
 class WorkingData:
     def __init__(self) -> None:
         self.newline = b'\n'
@@ -371,15 +381,16 @@ class WorkingData:
         self.in_file_iter = None
         self.out_file = sys.stdout.buffer
         self.line_number = 0
-        self.modification_detected = False
+        self.pattern_modified = False
+        self.file_modified = False
         self.insert_space = None
-        self._pattern_space = b''
+        self._pattern_space = None
         self.append_space = None
         self.jump_to = None
         self.holdspace = b''
 
     def set_in_file(self, file:FileIterable):
-        self.modification_detected = False
+        self.file_modified = False
         self.in_file = file
         # This will raise an exception if file could not be opened
         self.in_file_iter = iter(self.in_file)
@@ -396,6 +407,7 @@ class WorkingData:
 
         try:
             self._pattern_space = next(self.in_file_iter)
+            self.pattern_modified = False
         except StopIteration:
             self.in_file_iter = None
             return False
@@ -434,7 +446,7 @@ class WorkingData:
         if add_newline and not self.insert_space.endswith(self.newline):
             self.insert_space += self.newline
 
-        self.modification_detected = True
+        self.file_modified = True
 
     @property
     def pattern_space(self):
@@ -443,7 +455,8 @@ class WorkingData:
     @pattern_space.setter
     def pattern_space(self, b:bytes):
         self._pattern_space = b
-        self.modification_detected = True
+        self.file_modified = True
+        self.pattern_modified = True
 
     def append(self, a:bytes, add_newline=True):
         # Append to append space
@@ -455,7 +468,7 @@ class WorkingData:
         if add_newline and not self.append_space.endswith(self.newline):
             self.append_space += self.newline
 
-        self.modification_detected = True
+        self.file_modified = True
 
     def _write(self, b:bytes):
         self.out_file.write(b)
@@ -463,13 +476,13 @@ class WorkingData:
 
     def _flush_insert_data(self):
         if self.insert_space is not None:
-            self.modification_detected = True
+            self.file_modified = True
             self._write(self.insert_space)
             self.insert_space = None
 
     def _flush_append_data(self):
         if self.append_space is not None:
-            self.modification_detected = True
+            self.file_modified = True
             if self.pattern_space and not self.pattern_space.endswith(self.newline):
                 self._write(self.newline)
             self._write(self.append_space)
@@ -477,7 +490,7 @@ class WorkingData:
 
     def print_bytes(self, b:bytes):
         self._write(b)
-        self.modification_detected = True
+        self.file_modified = True
 
     def flush_all_data(self):
         self._flush_insert_data()
@@ -486,6 +499,7 @@ class WorkingData:
             # Write the modified pattern space
             self._write(self.pattern_space)
             self._pattern_space = None
+            self.pattern_modified = False
 
         self._flush_append_data()
 
@@ -724,12 +738,7 @@ class SubstituteCommand(SedCommand):
                     s.mark()
                     s.advance_until(SOMETIMES_END_CMD_CHAR) # Used the rest of the characters here
                     file_name = s.str_from_mark().strip()
-                    if file_name == '/dev/stdout':
-                        command.matched_file = sys.stdout.buffer
-                    elif file_name == '/dev/stderr':
-                        command.matched_file = sys.stderr.buffer
-                    else:
-                        command.matched_file = SharedFileWriter(file_name, binary=True, append=False)
+                    command.matched_file = _filename_to_writer(file_name)
                 elif c == 'e':
                     command.execute_replacement = True
                 elif c == 'i' or c == 'I':
@@ -1330,6 +1339,86 @@ class AppendLineFromFile(SedCommand):
         else:
             raise SedParsingException('Not an append line from file command sequence')
 
+class TestBranchCommand(SedCommand):
+    COMMAND_CHAR = 't'
+
+    def __init__(self, condition: SedCondition, branch_name=''):
+        super().__init__(condition)
+        self._branch_name = branch_name
+
+    def _handle(self, dat:WorkingData) -> None:
+        if dat.pattern_modified and self._branch_name:
+            dat.jump_to = self._branch_name
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            branch_name = s.str_from_mark()
+            return TestBranchCommand(condition, branch_name)
+        else:
+            raise SedParsingException('Not a test branch sequence')
+
+class TestBranchNotCommand(SedCommand):
+    COMMAND_CHAR = 'T'
+
+    def __init__(self, condition: SedCondition, branch_name=''):
+        super().__init__(condition)
+        self._branch_name = branch_name
+
+    def _handle(self, dat:WorkingData) -> None:
+        if not dat.pattern_modified and self._branch_name:
+            dat.jump_to = self._branch_name
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            branch_name = s.str_from_mark()
+            return TestBranchNotCommand(condition, branch_name)
+        else:
+            raise SedParsingException('Not a test branch not sequence')
+
+class VersionCommand(SedCommand):
+    COMMAND_CHAR = 'v'
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            version = s.str_from_mark()
+
+            try:
+                version_parts = [int(i) for i in version.split('.', 2)]
+            except ValueError:
+                raise SedParsingException('Not a valid version number')
+
+            for i,v in enumerate(version_parts):
+                if v > VERSION_PARTS[i]:
+                    raise SedParsingException('expected newer version of {}'.format(PACKAGE_NAME))
+                elif v < VERSION_PARTS[i]:
+                    break
+        else:
+            raise SedParsingException('Not a version sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -1392,6 +1481,9 @@ SED_COMMANDS = {
     QuitWithoutPrintCommand.COMMAND_CHAR: QuitWithoutPrintCommand,
     AppendFileContents.COMMAND_CHAR: AppendFileContents,
     AppendLineFromFile.COMMAND_CHAR: AppendLineFromFile,
+    TestBranchCommand.COMMAND_CHAR: TestBranchCommand,
+    TestBranchNotCommand.COMMAND_CHAR: TestBranchNotCommand,
+    VersionCommand.COMMAND_CHAR: VersionCommand,
     Label.COMMAND_CHAR: Label,
     Comment.COMMAND_CHAR: Comment
 }
@@ -1554,7 +1646,7 @@ class Sed:
             # Final pattern flush just in case there was something left
             dat.flush_all_data()
 
-            if dat.modification_detected and tmp_file:
+            if dat.file_modified and tmp_file:
                 # Write data from temp file to destination
                 tmp_file.flush()
                 file_name = os.path.abspath(file.name)

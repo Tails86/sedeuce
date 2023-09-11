@@ -671,10 +671,66 @@ class CliTests(unittest.TestCase):
             'hello'
         ])
 
+    def test_test_branch_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['s/this/that/;tcat;d;:cat', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, ['that is a file', ''])
+
+    def test_test_branch_not_command(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['s/this/that/;Tcat;d;:cat', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'which contains several lines,',
+            'and I am am am using',
+            'it to test',
+            'sed for a while',
+            '',
+            'here is some junk text',
+            'dlkjfkldsjf',
+            'dsfklaslkdjfa sedf;l asjd',
+            'fasjd f ;8675309',
+            ';ajsdfj sdljf ajsdfj;sdljf',
+            'ajsdfja;sjdf ;sdajf ;l'
+        ])
+
+    def test_version_invalid(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out,\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['vabc', 'file1.txt'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 5: Not a valid version number\n')
+
+    def test_version_valid_pass(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['v0.0.1000', 'file1.txt'])
+            in_dat = fake_out.buffer.getvalue().decode()
+        self.assertEqual(in_dat, test_file1)
+
+    def test_version_valid_fail(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out,\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['v10000.0', 'file1.txt'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 9: expected newer version of sedeuce\n')
+
+
+
+
+
+
     def test_comment(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
             # Invalid file should be completely ignored
-            sed.main(['# this; is a ; comment\nahello', 'file1.txt'])
+            sed.main(['  # this; is a ; comment\nahello', 'file1.txt'])
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(in_lines[:5], [
             'this is a file',
@@ -683,8 +739,6 @@ class CliTests(unittest.TestCase):
             'hello',
             'and I am am am using'
         ])
-
-
 
     def test_set_single_char_commands_failure_extra_chars(self):
         # This should really be a parametrized test, but I'm lazy...
