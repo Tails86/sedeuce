@@ -1419,6 +1419,62 @@ class VersionCommand(SedCommand):
         else:
             raise SedParsingException('Not a version sequence')
 
+class WritePatternCommand(SedCommand):
+    COMMAND_CHAR = 'w'
+
+    def __init__(self, condition: SedCondition, file_path) -> None:
+        super().__init__(condition)
+        self._out_file = _filename_to_writer(file_path)
+
+    def _handle(self, dat:WorkingData) -> None:
+        self._out_file.write(dat.pattern_space)
+        self._out_file.flush()
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            # Semicolons are considered part of the file name string
+            s.advance_end()
+            return WritePatternCommand(condition, s.str_from_mark())
+        else:
+            raise SedParsingException('Not a write pattern command sequence')
+
+class WritePatternToNewlineCommand(SedCommand):
+    COMMAND_CHAR = 'W'
+
+    def __init__(self, condition: SedCondition, file_path) -> None:
+        super().__init__(condition)
+        self._out_file = _filename_to_writer(file_path)
+
+    def _handle(self, dat:WorkingData) -> None:
+        loc = dat.pattern_space.find(dat.newline)
+        if loc < 0:
+            self._out_file.write(dat.pattern_space)
+        else:
+            self._out_file.write(dat.pattern_space[:loc+1])
+        self._out_file.flush()
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            s.mark()
+            # Semicolons are considered part of the file name string
+            s.advance_end()
+            return WritePatternCommand(condition, s.str_from_mark())
+        else:
+            raise SedParsingException('Not a write pattern command sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -1484,6 +1540,8 @@ SED_COMMANDS = {
     TestBranchCommand.COMMAND_CHAR: TestBranchCommand,
     TestBranchNotCommand.COMMAND_CHAR: TestBranchNotCommand,
     VersionCommand.COMMAND_CHAR: VersionCommand,
+    WritePatternCommand.COMMAND_CHAR: WritePatternCommand,
+    WritePatternToNewlineCommand.COMMAND_CHAR: WritePatternToNewlineCommand,
     Label.COMMAND_CHAR: Label,
     Comment.COMMAND_CHAR: Comment
 }

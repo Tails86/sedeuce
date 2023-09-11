@@ -722,6 +722,34 @@ class CliTests(unittest.TestCase):
             err_dat = fake_err.getvalue()
         self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 9: expected newer version of sedeuce\n')
 
+    def test_write(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            # TODO: This may be problematic if trying to execute in Windows? - test that
+            tmp = tempfile.NamedTemporaryFile('r')
+            sed.main([f'3,5w {tmp.name}'])
+
+            in_tmp = list(tmp.readlines())
+
+        self.assertEqual(in_tmp, [
+            'and I am am am using\n',
+            'it to test\n',
+            'sed for a while\n'
+        ])
+
+    def test_write_up_to_newline(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            # TODO: This may be problematic if trying to execute in Windows? - test that
+            tmp = tempfile.NamedTemporaryFile('r')
+            sed.main([f'3h;4G;4W {tmp.name}'])
+
+            in_tmp = list(tmp.readlines())
+
+        self.assertEqual(in_tmp, ['it to test\n'])
+
 
 
 
