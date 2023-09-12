@@ -1455,7 +1455,9 @@ class WritePatternToNewlineCommand(SedCommand):
     def _handle(self, dat:WorkingData) -> None:
         loc = dat.pattern_space.find(dat.newline)
         if loc < 0:
+            # Shouldn't normally reach here
             self._out_file.write(dat.pattern_space)
+            self._out_file.write(dat.newline)
         else:
             self._out_file.write(dat.pattern_space[:loc+1])
         self._out_file.flush()
@@ -1474,6 +1476,32 @@ class WritePatternToNewlineCommand(SedCommand):
             return WritePatternCommand(condition, s.str_from_mark())
         else:
             raise SedParsingException('Not a write pattern command sequence')
+
+class ExchangeCommand(SedCommand):
+    COMMAND_CHAR = 'x'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        temp = dat.holdspace
+        dat.holdspace = dat.pattern_space
+        if temp:
+            dat.pattern_space = temp
+        else:
+            dat.pattern_space = dat.newline
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return ExchangeCommand(condition)
+        else:
+            raise SedParsingException('Not an exchange command sequence')
 
 class Label(SedCommand):
     COMMAND_CHAR = ':'
@@ -1542,6 +1570,7 @@ SED_COMMANDS = {
     VersionCommand.COMMAND_CHAR: VersionCommand,
     WritePatternCommand.COMMAND_CHAR: WritePatternCommand,
     WritePatternToNewlineCommand.COMMAND_CHAR: WritePatternToNewlineCommand,
+    ExchangeCommand.COMMAND_CHAR: ExchangeCommand,
     Label.COMMAND_CHAR: Label,
     Comment.COMMAND_CHAR: Comment
 }

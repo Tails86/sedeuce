@@ -750,6 +750,27 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(in_tmp, ['it to test\n'])
 
+    def test_exchange(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['3h;x', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            '',
+            'this is a file',
+            'and I am am am using',
+            'and I am am am using',
+            'it to test',
+            'sed for a while',
+            '',
+            'here is some junk text',
+            'dlkjfkldsjf',
+            'dsfklaslkdjfa sedf;l asjd',
+            'fasjd f ;8675309',
+            ';ajsdfj sdljf ajsdfj;sdljf',
+            ''
+        ])
+
 
 
 
@@ -770,7 +791,7 @@ class CliTests(unittest.TestCase):
 
     def test_set_single_char_commands_failure_extra_chars(self):
         # This should really be a parametrized test, but I'm lazy...
-        single_char_commands = 'dDhHgGFlnNpP'
+        single_char_commands = 'dDhHgGFlnNpPx'
         for c in single_char_commands:
             with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
                 patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
