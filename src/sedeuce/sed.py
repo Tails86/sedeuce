@@ -1525,6 +1525,44 @@ class ZapCommand(SedCommand):
         else:
             raise SedParsingException('Not a zap command sequence')
 
+class Comment(SedCommand):
+    COMMAND_CHAR = '#'
+
+    def __init__(self, condition: SedCondition):
+        super().__init__(condition)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance_end()
+            return None
+        else:
+            raise SedParsingException('Not a comment')
+
+class PrintLineNumberCommand(SedCommand):
+    COMMAND_CHAR = '='
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat.insert(str(dat.line_number).encode())
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return PrintLineNumberCommand(condition)
+        else:
+            raise SedParsingException('Not a print line number command sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -1546,23 +1584,6 @@ class Label(SedCommand):
             return Label(condition, label)
         else:
             raise SedParsingException('Not a label')
-
-class Comment(SedCommand):
-    COMMAND_CHAR = '#'
-
-    def __init__(self, condition: SedCondition):
-        super().__init__(condition)
-
-    @staticmethod
-    def from_string(condition:SedCondition, s):
-        if isinstance(s, str):
-            s = StringParser(s)
-
-        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
-            s.advance_end()
-            return None
-        else:
-            raise SedParsingException('Not a comment')
 
 SED_COMMANDS = {
     SubstituteCommand.COMMAND_CHAR: SubstituteCommand,
@@ -1594,8 +1615,9 @@ SED_COMMANDS = {
     WritePatternToNewlineCommand.COMMAND_CHAR: WritePatternToNewlineCommand,
     ExchangeCommand.COMMAND_CHAR: ExchangeCommand,
     ZapCommand.COMMAND_CHAR: ZapCommand,
-    Label.COMMAND_CHAR: Label,
-    Comment.COMMAND_CHAR: Comment
+    Comment.COMMAND_CHAR: Comment,
+    PrintLineNumberCommand.COMMAND_CHAR: PrintLineNumberCommand,
+    Label.COMMAND_CHAR: Label
 }
 
 class Sed:
