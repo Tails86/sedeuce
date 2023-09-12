@@ -710,6 +710,7 @@ class SubstituteCommand(SedCommand):
             s = StringParser(s)
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            # TODO: the splitter character can be escaped to make literal splitter character
             splitter = s[1]
             s.advance(2)
             s.mark()
@@ -1503,6 +1504,27 @@ class ExchangeCommand(SedCommand):
         else:
             raise SedParsingException('Not an exchange command sequence')
 
+class ZapCommand(SedCommand):
+    COMMAND_CHAR = 'z'
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+
+    def _handle(self, dat:WorkingData) -> None:
+        dat.pattern_space = dat.newline
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            s.advance_past()
+            return ZapCommand(condition)
+        else:
+            raise SedParsingException('Not a zap command sequence')
+
 class Label(SedCommand):
     COMMAND_CHAR = ':'
 
@@ -1571,6 +1593,7 @@ SED_COMMANDS = {
     WritePatternCommand.COMMAND_CHAR: WritePatternCommand,
     WritePatternToNewlineCommand.COMMAND_CHAR: WritePatternToNewlineCommand,
     ExchangeCommand.COMMAND_CHAR: ExchangeCommand,
+    ZapCommand.COMMAND_CHAR: ZapCommand,
     Label.COMMAND_CHAR: Label,
     Comment.COMMAND_CHAR: Comment
 }

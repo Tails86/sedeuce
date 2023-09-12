@@ -771,6 +771,26 @@ class CliTests(unittest.TestCase):
             ''
         ])
 
+    def test_zap(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['3,5z', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'this is a file',
+            'which contains several lines,',
+            '',
+            '',
+            '',
+            '',
+            'here is some junk text',
+            'dlkjfkldsjf',
+            'dsfklaslkdjfa sedf;l asjd',
+            'fasjd f ;8675309',
+            ';ajsdfj sdljf ajsdfj;sdljf',
+            'ajsdfja;sjdf ;sdajf ;l'
+        ])
+
 
 
 
@@ -791,7 +811,7 @@ class CliTests(unittest.TestCase):
 
     def test_set_single_char_commands_failure_extra_chars(self):
         # This should really be a parametrized test, but I'm lazy...
-        single_char_commands = 'dDhHgGFlnNpPx'
+        single_char_commands = 'dDhHgGFlnNpPxz'
         for c in single_char_commands:
             with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
                 patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
