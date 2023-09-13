@@ -374,6 +374,50 @@ def _filename_to_writer(file_name):
     else:
         return SharedFileWriter(file_name, binary=True, append=False)
 
+def _count_end_escapes(s:str):
+    count = 0
+    for c in reversed(s):
+        if c == '\\':
+            count += 1
+        else:
+            break
+    return count
+
+def _string_to_splitter(s:StringParser, splitter):
+    s.mark()
+    if not s.advance_until(splitter):
+        return None
+    current_str = s.str_from_mark()
+    # If there are an odd number of slashes at the end of the string,
+    # then next newline was escaped;
+    # ex: \ escapes next \\ just means slash and \\\ means slash plus escape next
+    while _count_end_escapes(current_str) % 2 == 1:
+        # Remove the escape
+        current_str = current_str[:-1]
+        s.mark()
+        s.advance(1)
+        if not s.advance_until(splitter):
+            return None
+        current_str += s.str_from_mark()
+
+    return current_str
+
+def _dual_field_command_parse(s):
+    if isinstance(s, str):
+        s = StringParser(s)
+
+    splitter = s[0]
+    s.advance(1)
+    first = _string_to_splitter(s, splitter)
+    if first is None:
+        return (None, None)
+    s.advance(1)
+    second = _string_to_splitter(s, splitter)
+    if second is None:
+        return (first, None)
+    s.advance(1)
+    return (first, second)
+
 class WorkingData:
     def __init__(self) -> None:
         self.newline = b'\n'
@@ -710,20 +754,14 @@ class SubstituteCommand(SedCommand):
             s = StringParser(s)
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
-            # TODO: the splitter character can be escaped to make literal splitter character
-            splitter = s[1]
-            s.advance(2)
-            s.mark()
-            if not s.advance_until(splitter):
-                raise SedParsingException('unterminated `s\' command')
-            find_pattern = s.str_from_mark()
             s.advance(1)
-            s.mark()
-            if not s.advance_until(splitter):
+            find_pattern, replace_pattern = _dual_field_command_parse(s)
+
+            if find_pattern is None or replace_pattern is None:
                 raise SedParsingException('unterminated `s\' command')
-            replace_pattern = s.str_from_mark()
-            s.advance(1)
+
             command = SubstituteCommand(condition, find_pattern, replace_pattern)
+
             while s.advance_past() and s[0] not in SOMETIMES_END_CMD_CHAR:
                 c = s[0]
                 s.mark()
@@ -747,6 +785,7 @@ class SubstituteCommand(SedCommand):
                 elif c == 'm' or c == 'M':
                     command.multiline_mode = True
                 # else: ignore
+
             return command
         else:
             raise SedParsingException('Not a substitute sequence')
@@ -1504,6 +1543,45 @@ class ExchangeCommand(SedCommand):
         else:
             raise SedParsingException('Not an exchange command sequence')
 
+class TranslateCommand(SedCommand):
+    COMMAND_CHAR = 'y'
+
+    def __init__(self, condition: SedCondition, find_chars:str, replace_chars:str) -> None:
+        super().__init__(condition)
+        self.find_list = list(find_chars.encode())
+        self.replace_list = list(replace_chars.encode())
+
+    def _handle(self, dat: WorkingData) -> None:
+        pattern_list = list(dat.pattern_space)
+        for i in range(len(pattern_list)):
+            try:
+                loc = self.find_list.index(pattern_list[i])
+            except ValueError:
+                pass
+            else:
+                pattern_list[i] = self.replace_list[loc]
+        dat.pattern_space = bytes(pattern_list)
+
+    @staticmethod
+    def from_string(condition:SedCondition, s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
+        if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            s.advance(1)
+            find_chars, replace_chars = _dual_field_command_parse(s)
+
+            if find_chars is None or replace_chars is None:
+                raise SedParsingException('unterminated `y\' command')
+
+            if len(find_chars) != len(replace_chars):
+                raise SedParsingException('strings for y command are different lengths')
+
+            return TranslateCommand(condition, find_chars, replace_chars)
+        else:
+            raise SedParsingException('Not a substitute sequence')
+
+
 class ZapCommand(SedCommand):
     COMMAND_CHAR = 'z'
 
@@ -1614,6 +1692,7 @@ SED_COMMANDS = {
     WritePatternCommand.COMMAND_CHAR: WritePatternCommand,
     WritePatternToNewlineCommand.COMMAND_CHAR: WritePatternToNewlineCommand,
     ExchangeCommand.COMMAND_CHAR: ExchangeCommand,
+    TranslateCommand.COMMAND_CHAR: TranslateCommand,
     ZapCommand.COMMAND_CHAR: ZapCommand,
     Comment.COMMAND_CHAR: Comment,
     PrintLineNumberCommand.COMMAND_CHAR: PrintLineNumberCommand,
@@ -1648,13 +1727,7 @@ class Sed:
             # If there are an odd number of slashes at the end of the string,
             # then next newline was escaped;
             # ex: \ escapes next \\ just means slash and \\\ means slash plus escape next
-            count = 0
-            for c in reversed(script_lines[i]):
-                if c == '\\':
-                    count += 1
-                else:
-                    break
-            if count % 2 == 1:
+            if _count_end_escapes(script_lines[i]) % 2 == 1:
                 # Remove escaping char, glue the next one to the end of this one, and then delete next
                 script_lines[i] = script_lines[i][:-1] + script_lines[i+1]
                 del script_lines[i+1]

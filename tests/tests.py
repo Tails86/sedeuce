@@ -750,6 +750,26 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(in_tmp, ['it to test\n'])
 
+    def test_translate(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['y;\;aeiou;.kbymz;', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'thys ys k fylb',
+            'whych cmntkyns sbvbrkl lynbs,',
+            'knd I km km km zsyng',
+            'yt tm tbst',
+            'sbd fmr k whylb',
+            '',
+            'hbrb ys smmb jznk tbxt',
+            'dlkjfkldsjf',
+            'dsfklkslkdjfk sbdf.l ksjd',
+            'fksjd f .8675309',
+            '.kjsdfj sdljf kjsdfj.sdljf',
+            'kjsdfjk.sjdf .sdkjf .l'
+        ])
+
     def test_exchange(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
             # Invalid file should be completely ignored
@@ -815,11 +835,6 @@ class CliTests(unittest.TestCase):
             ';ajsdfj sdljf ajsdfj;sdljf',
             'ajsdfja;sjdf ;sdajf ;l'
         ])
-
-
-
-
-
 
     def test_comment(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
