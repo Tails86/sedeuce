@@ -30,6 +30,7 @@ import subprocess
 import tempfile
 import shutil
 import threading
+from typing import Any, Union, List
 
 __version__ = '0.1.1'
 PACKAGE_NAME = 'sedeuce'
@@ -50,10 +51,18 @@ class SedParsingException(Exception):
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
 
+class SedExecutionException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
 class SedQuitException(Exception):
     def __init__(self, exit_code:int) -> None:
         super().__init__()
         self.exit_code = exit_code
+
+class SedFileCompleteException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
 
 def _pattern_escape_invert(pattern, chars):
     for char in chars:
@@ -430,7 +439,7 @@ class WorkingData:
         self.insert_space = None
         self._pattern_space = None
         self.append_space = None
-        self.jump_to = None
+        self.jump_to = None # should be None, 0, -1, or string
         self.holdspace = b''
 
     def set_in_file(self, file:FileIterable):
@@ -453,6 +462,7 @@ class WorkingData:
             self._pattern_space = next(self.in_file_iter)
             self.pattern_modified = False
         except StopIteration:
+            self._pattern_space = None
             self.in_file_iter = None
             return False
         else:
@@ -468,6 +478,7 @@ class WorkingData:
             append_pattern = next(self.in_file_iter)
         except StopIteration:
             self.flush_all_data()
+            self._pattern_space = None
             self.in_file_iter = None
             return False
         else:
@@ -572,7 +583,10 @@ class RangeSedCondition(SedCondition):
         return dat.line_number >= self._start_line and dat.line_number <= self._end_line
 
     @staticmethod
-    def from_string(s:StringParser):
+    def from_string(s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
         if s.advance_past() and s[0] in NUMBER_CHARS:
             s.mark()
             s.advance_past(NUMBER_CHARS)
@@ -603,7 +617,10 @@ class RegexSedCondition(SedCondition):
         return (re.match(self._pattern, dat.pattern_space) is not None)
 
     @staticmethod
-    def from_string(s:StringParser):
+    def from_string(s):
+        if isinstance(s, str):
+            s = StringParser(s)
+
         if s.advance_past() and s[0] == '/':
             s.advance(1)
             s.mark()
@@ -619,7 +636,7 @@ class RegexSedCondition(SedCondition):
 class SedCommand:
     def __init__(self, condition:SedCondition) -> None:
         self._condition = condition
-        self.label = None
+        self.label:str = None
 
     def handle(self, dat:WorkingData) -> None:
         if self._condition is None or self._condition.is_match(dat):
@@ -831,7 +848,6 @@ class BranchCommand(SedCommand):
     def _handle(self, dat:WorkingData) -> None:
         if self._branch_name:
             dat.jump_to = self._branch_name
-        return
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -892,7 +908,8 @@ class DeleteCommand(SedCommand):
 
     def _handle(self, dat:WorkingData) -> None:
         dat.pattern_space = b''
-        dat.jump_to = -1 # jump to end
+        # Jump to end
+        dat.jump_to = -1
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -916,12 +933,12 @@ class DeleteToNewlineCommand(SedCommand):
         pos = dat.pattern_space.find(dat.newline)
         if pos >= 0:
             dat.pattern_space = dat.pattern_space[pos+1:]
-            dat.jump_to = 0 # jump to beginning
+            # jump to beginning
+            dat.jump_to = 0
         else:
             dat.pattern_space = b''
-            dat.jump_to = -1 # jump to end
-        self._last_processed_line = dat.line_number
-        return
+            # jump to end
+            dat.jump_to = -1
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -1167,7 +1184,8 @@ class NextCommand(SedCommand):
         super().__init__(condition)
 
     def _handle(self, dat:WorkingData) -> None:
-        dat.next_line()
+        if not dat.next_line():
+            raise SedFileCompleteException()
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -1188,7 +1206,8 @@ class AppendNextCommand(SedCommand):
         super().__init__(condition)
 
     def _handle(self, dat:WorkingData) -> None:
-        dat.append_next_line()
+        if not dat.append_next_line():
+            raise SedFileCompleteException()
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -1650,6 +1669,10 @@ class Label(SedCommand):
 
     @staticmethod
     def from_string(condition:SedCondition, s):
+        if condition is not None:
+            # A label cannot accept any condition
+            raise SedParsingException(': doesn\'t want any addresses')
+
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1662,6 +1685,121 @@ class Label(SedCommand):
             return Label(condition, label)
         else:
             raise SedParsingException('Not a label')
+
+class SedCommandGroup(SedCommand):
+    ''' Allows a single condition to control a group of commands '''
+
+    def __init__(self, condition: SedCondition) -> None:
+        super().__init__(condition)
+        self.commands:List[SedCommand] = []
+
+    def add_commands(self, *args) -> None:
+        for arg in args:
+            if isinstance(arg, SedCommand):
+                self.commands.append(arg)
+            elif isinstance(arg, list):
+                self.commands.extend(arg)
+            else:
+                raise ValueError('Invalid type {}'.format(type(arg)))
+
+    def clear_commands(self):
+        self.commands.clear()
+
+    def find_label(self, lbl):
+        for i, command in enumerate(self.commands):
+            if isinstance(command, SedCommandGroup):
+                if command.find_label(lbl) >= 0:
+                    return i
+            elif command.label == lbl:
+                return i
+        return -1
+
+    def get_all_labels(self):
+        labels = []
+        for command in self.commands:
+            if isinstance(command, SedCommandGroup):
+                labels.extend(command.get_all_labels())
+            elif command.label is not None:
+                labels.append(command.label)
+        return labels
+
+    def check_labels(self):
+        labels = self.get_all_labels()
+        for label in labels:
+            if self.find_label(label) < 0:
+                raise SedParsingException(f"can't find label for jump to `{label}'")
+
+    def _execute_label(self, dat:WorkingData, lbl:str) -> int:
+        for i, command in enumerate(self.commands):
+            if isinstance(command, SedCommandGroup):
+                if command.jump_to_label(dat, lbl):
+                    return i
+            elif command.label == lbl:
+                command.handle(dat)
+                return i
+        return -1
+
+    def jump_to_label(self, dat:WorkingData, lbl:str) -> bool:
+        index = self._execute_label(dat, lbl)
+        if index < 0:
+            # The label doesn't exist here
+            return False
+        elif dat.jump_to is not None:
+            # Label found and executed. Then it jumped somewhere different
+            # Let the caller handle this
+            return True
+        else:
+            # Go right to handling label+1
+            self._handle(dat, index+1)
+            return True
+
+    def _handle(self, dat: WorkingData, jump_to_idx:int=0) -> None:
+        i = jump_to_idx
+        while i < len(self.commands):
+            command = self.commands[i]
+            i += 1
+            command.handle(dat)
+            if dat.jump_to is not None:
+                # Let the caller handle this
+                return
+
+    def parse_script_lines(self, script_lines):
+        for i, line in enumerate(script_lines):
+            substr_line = StringParser(line)
+            while len(substr_line) > 0:
+                substr_line.advance_past()
+                c = substr_line[0]
+                try:
+                    if c in NUMBER_CHARS:
+                        # Range condition
+                        condition = RangeSedCondition.from_string(substr_line)
+                    elif c == '/':
+                        # Regex condition
+                        condition = RegexSedCondition.from_string(substr_line)
+                    else:
+                        condition = None
+
+                    if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
+                        command_type = SED_COMMANDS.get(substr_line[0], None)
+
+                        if command_type is None:
+                            raise SedParsingException(f'Invalid command: {substr_line[0]}')
+
+                        command = command_type.from_string(condition, substr_line)
+
+                        if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
+                            raise SedParsingException(f'extra characters after command')
+
+                        if command is not None:
+                            self.add_commands(command)
+
+                        substr_line.advance_past(WHITESPACE_CHARS + SOMETIMES_END_CMD_CHAR)
+
+                    elif condition is not None:
+                        raise SedParsingException('missing command')
+
+                except SedParsingException as ex:
+                    raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.pos+1}: {ex}')
 
 SED_COMMANDS = {
     SubstituteCommand.COMMAND_CHAR: SubstituteCommand,
@@ -1701,7 +1839,7 @@ SED_COMMANDS = {
 
 class Sed:
     def __init__(self):
-        self._commands = []
+        self._commands = SedCommandGroup(None)
         self._files = []
         self.in_place = False
         self.in_place_backup_suffix = None
@@ -1732,57 +1870,16 @@ class Sed:
                 script_lines[i] = script_lines[i][:-1] + script_lines[i+1]
                 del script_lines[i+1]
 
-        self._parse_script_lines(script_lines)
+        self.add_script_lines(script_lines)
 
     def add_script_lines(self, script_lines:list):
-        self._parse_script_lines(script_lines)
-
-    def _parse_script_lines(self, script_lines):
-        for i, line in enumerate(script_lines):
-            substr_line = StringParser(line)
-            while len(substr_line) > 0:
-                substr_line.advance_past()
-                c = substr_line[0]
-                try:
-                    if c in NUMBER_CHARS:
-                        # Range condition
-                        condition = RangeSedCondition.from_string(substr_line)
-                    elif c == '/':
-                        # Regex condition
-                        condition = RegexSedCondition.from_string(substr_line)
-                    else:
-                        condition = None
-
-                    if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
-                        command_type = SED_COMMANDS.get(substr_line[0], None)
-
-                        if command_type is None:
-                            raise SedParsingException(f'Invalid command: {substr_line[0]}')
-
-                        command = command_type.from_string(condition, substr_line)
-
-                        if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
-                            raise SedParsingException(f'extra characters after command')
-
-                        substr_line.advance_past(WHITESPACE_CHARS + SOMETIMES_END_CMD_CHAR)
-
-                        if command is not None:
-                            self._commands.append(command)
-
-                    elif condition is not None:
-                        raise SedParsingException('missing command')
-
-                except SedParsingException as ex:
-                    raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.pos+1}: {ex}')
+        self._commands.parse_script_lines(script_lines)
 
     def add_command(self, command_or_commands):
-        if isinstance(command_or_commands, list):
-            self._commands.extend(command_or_commands)
-        else:
-            self._commands.append(command_or_commands)
+        self._commands.add_commands(command_or_commands)
 
     def clear_commands(self):
-        self._commands.clear()
+        self._commands.clear_commands()
 
     def add_file(self, file_or_files):
         if isinstance(file_or_files, list):
@@ -1794,6 +1891,8 @@ class Sed:
         self._files.clear()
 
     def execute(self):
+        self._commands.check_labels()
+
         if not self._files:
             files = [StdinIterable(end=self.newline, label='-')]
         else:
@@ -1813,39 +1912,27 @@ class Sed:
                 dat.out_file = sys.stdout.buffer
 
             while dat.next_line():
-                i = 0
-                while i < len(self._commands):
-                    command = self._commands[i]
-                    i += 1
-
-                    try:
-                        command.handle(dat)
-                    except SedQuitException as ex:
-                        return ex.exit_code
-
-                    if dat.pattern_space is None:
-                        # This will happen if a next command was used, and there is nothing else to read
-                        break
-                    # Command may set jump_to when we need to jump to another command
-                    elif dat.jump_to is not None:
+                # Start at the beginning
+                dat.jump_to = 0
+                try:
+                    while dat.jump_to is not None:
                         jump_to = dat.jump_to
                         dat.jump_to = None
-                        # jump_to may be an index or label
-                        if isinstance(jump_to, int):
-                            if jump_to < 0:
-                                # Jump to end
-                                i = len(self._commands)
-                            else:
-                                # Jump to index (usually 0)
-                                i = jump_to
-                        else:
-                            i = -1
-                            for j,c in enumerate(self._commands):
-                                if c.label == jump_to:
-                                    i = j
-                                    break
-                            if i < 0:
-                                raise SedParsingException(f"can't find label for jump to `{jump_to}'")
+                        # jump_to may be -1, 0, or label
+                        if jump_to == 0:
+                            # Jump to beginning
+                            self._commands.handle(dat)
+                        elif isinstance(jump_to, str):
+                            if not self._commands.jump_to_label(dat, jump_to):
+                                # Shouldn't reach here due to self._commands.check_labels() above
+                                raise SedExecutionException(f"can't find label for jump to `{jump_to}'")
+                        # else: jump to end (flush and read next line)
+                except SedQuitException as ex:
+                    return ex.exit_code
+                except SedFileCompleteException:
+                    # This will happen if a next command was used, and there is nothing else to read
+                    break
+
                 dat.flush_all_data()
 
             # Final pattern flush just in case there was something left
