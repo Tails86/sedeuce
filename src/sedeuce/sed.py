@@ -77,8 +77,9 @@ def _pattern_escape_invert(pattern, chars):
 class StringParser:
     ''' Contains a string and an advancing position pointer '''
 
-    def __init__(self, s='', pos=0):
+    def __init__(self, s='', pos=0, char_offset=0):
         self.set(s, pos)
+        self.char_offset = char_offset
         self.mark()
 
     def set(self, s='', pos=0):
@@ -109,6 +110,10 @@ class StringParser:
     @pos.setter
     def pos(self, pos):
         self._pos = pos
+
+    @property
+    def pos_offset(self):
+        return self.pos + self.char_offset
 
     def advance(self, inc):
         ''' Advances a set number of characters '''
@@ -146,10 +151,13 @@ class StringParser:
         if isinstance(val, int):
             val += offset
         elif isinstance(val, slice):
+            start = val.start
+            stop = val.stop
             if val.start is not None:
-                val.start += offset
+                start += offset
             if val.stop is not None:
-                val.stop += offset
+                stop += offset
+            val = slice(start, stop, val.step)
         else:
             raise TypeError('Invalid type for __getitem__')
         return self._s[val]
@@ -1763,43 +1771,68 @@ class SedCommandGroup(SedCommand):
                 # Let the caller handle this
                 return
 
-    def parse_script_lines(self, script_lines):
-        for i, line in enumerate(script_lines):
-            substr_line = StringParser(line)
-            while len(substr_line) > 0:
-                substr_line.advance_past()
-                c = substr_line[0]
+    def _parse_expression_lines(self, script_lines:List[StringParser], expression_number:int):
+        for line in script_lines:
+            while line.advance_past(WHITESPACE_CHARS + SOMETIMES_END_CMD_CHAR):
+                c = line[0]
                 try:
                     if c in NUMBER_CHARS:
                         # Range condition
-                        condition = RangeSedCondition.from_string(substr_line)
+                        condition = RangeSedCondition.from_string(line)
                     elif c == '/':
                         # Regex condition
-                        condition = RegexSedCondition.from_string(substr_line)
+                        condition = RegexSedCondition.from_string(line)
                     else:
                         condition = None
 
-                    if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
-                        command_type = SED_COMMANDS.get(substr_line[0], None)
+                    if line.advance_past() and line[0] not in SOMETIMES_END_CMD_CHAR:
+                        c = line[0]
+                        if c == '{':
+                            pass
+                        elif c == '}':
+                            pass
+                        else:
+                            command_type = SED_COMMANDS.get(c, None)
 
-                        if command_type is None:
-                            raise SedParsingException(f'Invalid command: {substr_line[0]}')
+                            if command_type is None:
+                                raise SedParsingException(f'Invalid command: {c}')
 
-                        command = command_type.from_string(condition, substr_line)
+                            command = command_type.from_string(condition, line)
 
-                        if substr_line.advance_past() and substr_line[0] not in SOMETIMES_END_CMD_CHAR:
-                            raise SedParsingException(f'extra characters after command')
+                            if line.advance_past() and line[0] not in SOMETIMES_END_CMD_CHAR:
+                                raise SedParsingException(f'extra characters after command')
 
-                        if command is not None:
-                            self.add_commands(command)
-
-                        substr_line.advance_past(WHITESPACE_CHARS + SOMETIMES_END_CMD_CHAR)
+                            if command is not None:
+                                self.add_commands(command)
 
                     elif condition is not None:
                         raise SedParsingException('missing command')
 
                 except SedParsingException as ex:
-                    raise SedParsingException(f'Error at expression #{i+1}, char {substr_line.pos+1}: {ex}')
+                    raise SedParsingException(f'Error at expression #{expression_number}, char {line.pos_offset+1}: {ex}')
+
+    def add_expression(self, expression:str, expression_number:int):
+        # TODO: Support brackets
+
+        # Since newline is always a command terminator, parse for that here
+        script_lines = [StringParser(s) for s in expression.split(ALWAYS_END_CMD_CHAR)]
+        # Save offset of each line for future logging
+        char_offset = 0
+        for line in script_lines:
+            line.char_offset = char_offset
+            char_offset += len(line.base_str)
+
+        # Iterate in reverse, 1 from end so that we can glue the "next" one if escaped char found
+        for i in range(len(script_lines)-2, -1, -1):
+            # If there are an odd number of slashes at the end of the string,
+            # then next newline was escaped;
+            # ex: \ escapes next \\ just means slash and \\\ means slash plus escape next
+            if _count_end_escapes(script_lines[i].base_str) % 2 == 1:
+                # Remove escaping char, glue the next one to the end of this one, and then delete next
+                script_lines[i].base_str = script_lines[i].base_str[:-1] + '\n' + script_lines[i+1].base_str
+                del script_lines[i+1]
+
+        self._parse_expression_lines(script_lines, expression_number)
 
 SED_COMMANDS = {
     SubstituteCommand.COMMAND_CHAR: SubstituteCommand,
@@ -1840,6 +1873,7 @@ SED_COMMANDS = {
 class Sed:
     def __init__(self):
         self._commands = SedCommandGroup(None)
+        self._expression_number = 0
         self._files = []
         self.in_place = False
         self.in_place_backup_suffix = None
@@ -1856,30 +1890,16 @@ class Sed:
         else:
             self._newline = newline
 
-    def add_script(self, script:str):
-        # TODO: Support brackets
-        # Since newline is always a command terminator, parse for that here
-        script_lines = script.split(ALWAYS_END_CMD_CHAR)
-        # Iterate in reverse, 1 from end so that we can glue the "next" one if escaped char found
-        for i in range(len(script_lines)-2, -1, -1):
-            # If there are an odd number of slashes at the end of the string,
-            # then next newline was escaped;
-            # ex: \ escapes next \\ just means slash and \\\ means slash plus escape next
-            if _count_end_escapes(script_lines[i]) % 2 == 1:
-                # Remove escaping char, glue the next one to the end of this one, and then delete next
-                script_lines[i] = script_lines[i][:-1] + script_lines[i+1]
-                del script_lines[i+1]
-
-        self.add_script_lines(script_lines)
-
-    def add_script_lines(self, script_lines:list):
-        self._commands.parse_script_lines(script_lines)
+    def add_expression(self, script:str):
+        self._expression_number += 1
+        self._commands.add_expression(script, self._expression_number)
 
     def add_command(self, command_or_commands):
         self._commands.add_commands(command_or_commands)
 
     def clear_commands(self):
         self._commands.clear_commands()
+        self._expression_number = 0
 
     def add_file(self, file_or_files):
         if isinstance(file_or_files, list):
@@ -2005,7 +2025,7 @@ def main(cliargs):
         return 1
     sed = Sed()
     try:
-        sed.add_script(args.script)
+        sed.add_expression(args.script)
         if args.input_file:
             sed.add_file(args.input_file)
         if args.in_place is not None:

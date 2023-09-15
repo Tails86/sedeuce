@@ -862,5 +862,16 @@ class CliTests(unittest.TestCase):
             self.assertEqual(in_dat, '')
             self.assertEqual(in_err, 'sedeuce: Error at expression #1, char 3: extra characters after command\n')
 
+    def test_escaped_newline(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            sed.main(['ahello\\\nworld', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:6], [
+            'this is a file', 'hello', 'world', 'which contains several lines,', 'hello', 'world'
+        ])
+
+
 if __name__ == '__main__':
     unittest.main()
