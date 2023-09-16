@@ -863,15 +863,51 @@ class CliTests(unittest.TestCase):
             self.assertEqual(in_err, 'sedeuce: Error at expression #1, char 3: extra characters after command\n')
 
     def test_escaped_newline(self):
-        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
-            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
-        :
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
             sed.main(['ahello\\\nworld', 'file1.txt'])
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(in_lines[:6], [
             'this is a file', 'hello', 'world', 'which contains several lines,', 'hello', 'world'
         ])
 
+    def test_unmatched_close_bracket(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()), \
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            sed.main(['}ahello', 'file1.txt'])
+            err_str = fake_err.getvalue()
+        self.assertEqual(err_str, "sedeuce: Error at expression #1, char 1: unexpected `}'\n")
+
+    def test_unmatched_open_bracket(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()), \
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            sed.main(['{ahello', 'file1.txt'])
+            err_str = fake_err.getvalue()
+        self.assertEqual(err_str, "sedeuce: Error at expression #1, char 8: unmatched `{'\n")
+
+    def test_bracketed_expression(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['s/i/o/; 3,5{s/i/u/i;a hello\n/u am/{i woop\ns/usong/god/}}', 'file1.txt'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'thos is a file',
+            'whoch contains several lines,',
+            'woop',
+            'and u am am am god',
+            'hello',
+            'ot to test',
+            'hello',
+            'sed for a whole',
+            'hello',
+            '',
+            'here os some junk text',
+            'dlkjfkldsjf',
+            'dsfklaslkdjfa sedf;l asjd',
+            'fasjd f ;8675309',
+            ';ajsdfj sdljf ajsdfj;sdljf',
+            'ajsdfja;sjdf ;sdajf ;l'
+        ])
 
 if __name__ == '__main__':
     unittest.main()

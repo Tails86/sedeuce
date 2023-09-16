@@ -44,7 +44,7 @@ VERSION_PARTS = [int(i) for i in __version__.split('.')]
 WHITESPACE_CHARS = (' \t\r\n\v\f\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004'
                     '\u2005\u2006\u2007\u2008\u2009\u200A\u202F\u205F\u3000')
 NUMBER_CHARS = '0123456789'
-SOMETIMES_END_CMD_CHAR = ';'
+SOMETIMES_END_CMD_CHARS = ';}'
 ALWAYS_END_CMD_CHAR = '\n'
 
 class SedParsingException(Exception):
@@ -622,7 +622,7 @@ class RegexSedCondition(SedCondition):
             self._pattern = self._pattern.encode()
 
     def is_match(self, dat:WorkingData) -> bool:
-        return (re.match(self._pattern, dat.pattern_space) is not None)
+        return (re.search(self._pattern, dat.pattern_space) is not None)
 
     @staticmethod
     def from_string(s):
@@ -787,7 +787,7 @@ class SubstituteCommand(SedCommand):
 
             command = SubstituteCommand(condition, find_pattern, replace_pattern)
 
-            while s.advance_past() and s[0] not in SOMETIMES_END_CMD_CHAR:
+            while s.advance_past() and s[0] not in SOMETIMES_END_CMD_CHARS:
                 c = s[0]
                 s.mark()
                 s.advance(1)
@@ -800,7 +800,7 @@ class SubstituteCommand(SedCommand):
                     command.print_matched_lines = True
                 elif c == 'w':
                     s.mark()
-                    s.advance_until(SOMETIMES_END_CMD_CHAR) # Used the rest of the characters here
+                    s.advance_end() # Used the rest of the characters here, including end command chars
                     file_name = s.str_from_mark().strip()
                     command.matched_file = _filename_to_writer(file_name)
                 elif c == 'e':
@@ -866,7 +866,7 @@ class BranchCommand(SedCommand):
             s.advance(1)
             s.advance_past()
             s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            s.advance_until(SOMETIMES_END_CMD_CHARS)
             branch_name = s.str_from_mark()
             return BranchCommand(condition, branch_name)
         else:
@@ -1426,7 +1426,7 @@ class TestBranchCommand(SedCommand):
             s.advance(1)
             s.advance_past()
             s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            s.advance_until(SOMETIMES_END_CMD_CHARS)
             branch_name = s.str_from_mark()
             return TestBranchCommand(condition, branch_name)
         else:
@@ -1452,7 +1452,7 @@ class TestBranchNotCommand(SedCommand):
             s.advance(1)
             s.advance_past()
             s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            s.advance_until(SOMETIMES_END_CMD_CHARS)
             branch_name = s.str_from_mark()
             return TestBranchNotCommand(condition, branch_name)
         else:
@@ -1470,7 +1470,7 @@ class VersionCommand(SedCommand):
             s.advance(1)
             s.advance_past()
             s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            s.advance_until(SOMETIMES_END_CMD_CHARS)
             version = s.str_from_mark()
 
             try:
@@ -1688,7 +1688,7 @@ class Label(SedCommand):
             s.advance(1)
             s.advance_past()
             s.mark()
-            s.advance_until(SOMETIMES_END_CMD_CHAR)
+            s.advance_until(SOMETIMES_END_CMD_CHARS)
             label = s.str_from_mark()
             return Label(condition, label)
         else:
@@ -1762,18 +1762,16 @@ class SedCommandGroup(SedCommand):
             return True
 
     def _handle(self, dat: WorkingData, jump_to_idx:int=0) -> None:
-        i = jump_to_idx
-        while i < len(self.commands):
-            command = self.commands[i]
-            i += 1
+        for command in self.commands[jump_to_idx:]:
             command.handle(dat)
             if dat.jump_to is not None:
                 # Let the caller handle this
                 return
 
-    def _parse_expression_lines(self, script_lines:List[StringParser], expression_number:int):
-        for line in script_lines:
-            while line.advance_past(WHITESPACE_CHARS + SOMETIMES_END_CMD_CHAR):
+    def _parse_expression_lines(self, script_lines:List[StringParser], expression_number:int, recursion_idx=0):
+        for i in range(len(script_lines)):
+            line = script_lines[i]
+            while line.advance_past(WHITESPACE_CHARS + ';'):
                 c = line[0]
                 try:
                     if c in NUMBER_CHARS:
@@ -1785,12 +1783,26 @@ class SedCommandGroup(SedCommand):
                     else:
                         condition = None
 
-                    if line.advance_past() and line[0] not in SOMETIMES_END_CMD_CHAR:
+                    if line.advance_past() and line[0] not in ';':
                         c = line[0]
                         if c == '{':
-                            pass
+                            # Start a new group
+                            line.advance(1)
+                            command = SedCommandGroup(condition)
+                            inc = command._parse_expression_lines(script_lines[i:], expression_number, recursion_idx+1)
+                            self.add_commands(command)
+                            if inc is not None:
+                                i += inc
+                                line = script_lines[i]
+                                line.advance(1)
+                                continue
+                            else:
+                                raise SedParsingException("unmatched `{'")
                         elif c == '}':
-                            pass
+                            if recursion_idx == 0:
+                                raise SedParsingException("unexpected `}'")
+                            else:
+                                return i
                         else:
                             command_type = SED_COMMANDS.get(c, None)
 
@@ -1799,7 +1811,7 @@ class SedCommandGroup(SedCommand):
 
                             command = command_type.from_string(condition, line)
 
-                            if line.advance_past() and line[0] not in SOMETIMES_END_CMD_CHAR:
+                            if line.advance_past() and line[0] not in SOMETIMES_END_CMD_CHARS:
                                 raise SedParsingException(f'extra characters after command')
 
                             if command is not None:
@@ -1810,10 +1822,10 @@ class SedCommandGroup(SedCommand):
 
                 except SedParsingException as ex:
                     raise SedParsingException(f'Error at expression #{expression_number}, char {line.pos_offset+1}: {ex}')
+            i += 1
+        return None
 
     def add_expression(self, expression:str, expression_number:int):
-        # TODO: Support brackets
-
         # Since newline is always a command terminator, parse for that here
         script_lines = [StringParser(s) for s in expression.split(ALWAYS_END_CMD_CHAR)]
         # Save offset of each line for future logging
