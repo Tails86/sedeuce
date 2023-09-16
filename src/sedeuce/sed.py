@@ -2094,8 +2094,11 @@ def parse_args(cliargs):
     parser.add_argument('-u', '--unbuffered', action='store_true',
                         help='load minimal amounts of data from the input files and flush '
                         'the output buffers more often')
-    # parser.add_argument('-z', '--null-data', action='store_true',
-    #                     help='separate lines by NUL characters')
+    parser.add_argument('--end', type=str, default='\n',
+                        help='end-of-line character for parsing search files (default: \\n); '
+                        'this does not affect file parsing for -f or --exclude-from')
+    parser.add_argument('-z', '--null-data', action='store_true',
+                        help='same as --end=\'\\0\'')
     parser.add_argument('--version', action='store_true',
                         help='output version information and exit')
     parser.add_argument('--verbose', action='store_true', help='show verbose errors')
@@ -2106,7 +2109,7 @@ def parse_args(cliargs):
         if args.script is not None:
             args.input_file.insert(0, args.script)
             args.script = None
-    elif not args.script:
+    elif args.script is None:
         parser.print_help()
         sys.exit(1)
 
@@ -2126,6 +2129,10 @@ def main(cliargs):
         sed.unambiguous_line_len = args.line_length
         sed.separate = args.separate
         sed.sandbox_mode = args.sandbox
+        if args.null_data:
+            sed.newline = '\0'
+        else:
+            sed.newline = bytes(args.end, "utf-8").decode("unicode_escape")
         if args.script:
             sed.add_expression(args.script)
         for expression in args.expression:

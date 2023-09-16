@@ -1076,6 +1076,26 @@ class CliTests(unittest.TestCase):
             err_dat = fake_err.getvalue()
         self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 14: e/r/w commands disabled in sandbox mode\n')
 
+    def test_end_option(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            # Invalid file should be completely ignored
+            sed.main(['a-', 'file1.txt', '--end= '])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'this - is - a - file',
+            'which - contains - several - lines,',
+            'and - I - am - am - am - using',
+            'it - to - test',
+            'sed - for - a - while',
+            '',
+            'here - is - some - junk - text',
+            'dlkjfkldsjf',
+            'dsfklaslkdjfa - sedf;l - asjd',
+            'fasjd - f - ;8675309',
+            ';ajsdfj - sdljf - ajsdfj;sdljf',
+            'ajsdfja;sjdf - ;sdajf - ;l- '
+        ])
+
 
 if __name__ == '__main__':
     unittest.main()
