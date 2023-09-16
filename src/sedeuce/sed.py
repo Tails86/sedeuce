@@ -2073,7 +2073,8 @@ def parse_args(cliargs):
 
     parser.add_argument('-n', '--quiet', '--silent', dest='quiet', action='store_true',
                         help='suppress automatic printing of pattern space')
-    # parser.add_argument('--debug', action='store_true', help='annotate program execution')
+    # No debug data
+    parser.add_argument('--debug', action='store_true', help='annotate program execution')
     parser.add_argument('-e', '--expression', metavar='script', type=str, default=[], action='append',
                         help='add the script to the commands to be executed')
     parser.add_argument('-f', '--file', metavar='script-file', type=str, default=[], action='append',
