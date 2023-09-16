@@ -460,12 +460,15 @@ class WorkingData:
         self.holdspace = b''
         self.extended_regex = False
         self.unambiguous_line_len = 70
+        self.separate = False
 
     def set_in_file(self, file:FileIterable):
         self.file_modified = False
         self.in_file = file
         # This will raise an exception if file could not be opened
         self.in_file_iter = iter(self.in_file)
+        if self.separate:
+            self.line_number = 0
 
     @property
     def file_name(self):
@@ -1934,6 +1937,7 @@ class Sed:
         self.suppress_pattern_print = False
         self.extended_regex = False
         self.unambiguous_line_len = 70
+        self.separate = False
 
     @property
     def newline(self):
@@ -1978,6 +1982,7 @@ class Sed:
         dat.suppress_pattern_print = self.suppress_pattern_print
         dat.extended_regex = self.extended_regex
         dat.unambiguous_line_len = self.unambiguous_line_len
+        dat.separate = self.separate
         dat.newline = self.newline
         for file in files:
             dat.set_in_file(file)
@@ -2057,9 +2062,9 @@ def parse_args(cliargs):
     # parser.add_argument('--posix', action='store_true', help='disable all GNU extensions.')
     parser.add_argument('-E', '-r', '--regexp-extended', action='store_true',
                         help='use extended regular expressions in the script')
-    # parser.add_argument('-s', '--separate', action='store_true',
-    #                     help='consider files as separate rather than as a single, '
-    #                     'continuous long stream.')
+    parser.add_argument('-s', '--separate', action='store_true',
+                        help='consider files as separate rather than as a single, '
+                        'continuous long stream.')
     # parser.add_argument('--sandbox', action='store_true',
     #                     help='operate in sandbox mode (disable e/r/w commands).')
     # parser.add_argument('-u', '--unbuffered', action='store_true',
@@ -2102,6 +2107,7 @@ def main(cliargs):
         sed.suppress_pattern_print = args.quiet
         sed.extended_regex = args.regexp_extended
         sed.unambiguous_line_len = args.line_length
+        sed.separate = args.separate
         if args.input_file:
             sed.add_file(args.input_file)
         if args.in_place is not None:

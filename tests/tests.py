@@ -999,6 +999,19 @@ class CliTests(unittest.TestCase):
             '\\\\$'
         ])
 
+    def test_separate_option(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main(['1,3p;d', 'file1.txt', 'numbers.txt', '-s'])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines, [
+            'this is a file',
+            'which contains several lines,',
+            'and I am am am using',
+            '0',
+            '1',
+            '2',
+            ''
+        ])
 
 
 if __name__ == '__main__':
