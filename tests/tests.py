@@ -1096,6 +1096,41 @@ class CliTests(unittest.TestCase):
             'ajsdfja;sjdf - ;sdajf - ;l- '
         ])
 
+    def test_in_place_option(self):
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            file_path = os.path.join(tmp_dir.name, 'file.txt')
+            with open(file_path, 'w') as fd:
+                fd.write(test_file1)
+            with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+                sed.main(['3p;d', file_path, '-i'])
+                out_dat = fake_out.buffer.getvalue().decode()
+            self.assertEqual(out_dat, '')
+            with open(file_path, 'r') as fd:
+                file_dat = fd.read()
+            self.assertEqual(file_dat, 'and I am am am using\n')
+        finally:
+            tmp_dir.cleanup()
+
+    def test_in_place_backup_option(self):
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            file_path = os.path.join(tmp_dir.name, 'file.txt')
+            with open(file_path, 'w') as fd:
+                fd.write(test_file1)
+            with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+                sed.main(['3p;d', file_path, '-i', '.bak'])
+                out_dat = fake_out.buffer.getvalue().decode()
+            self.assertEqual(out_dat, '')
+            with open(file_path, 'r') as fd:
+                file_dat = fd.read()
+            with open(file_path + '.bak', 'r') as fd:
+                bak_file_dat = fd.read()
+            self.assertEqual(bak_file_dat, test_file1)
+            self.assertEqual(file_dat, 'and I am am am using\n')
+        finally:
+            tmp_dir.cleanup()
+
 
 if __name__ == '__main__':
     unittest.main()

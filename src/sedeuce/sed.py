@@ -1960,6 +1960,7 @@ class Sed:
         self.unambiguous_line_len = 70
         self.separate = False
         self.sandbox_mode = False
+        self.follow_symlinks = False
 
     @property
     def newline(self):
@@ -2047,7 +2048,10 @@ class Sed:
             if dat.file_modified and tmp_file:
                 # Write data from temp file to destination
                 tmp_file.flush()
-                file_name = os.path.abspath(file.name)
+                if self.follow_symlinks:
+                    file_name = os.path.abspath(os.path.realpath(file.name))
+                else:
+                    file_name = os.path.abspath(file.name)
                 if self.in_place_backup_suffix is not None:
                     backup_name = file_name + self.in_place_backup_suffix
                     shutil.copy2(file_name, backup_name)
@@ -2074,8 +2078,8 @@ def parse_args(cliargs):
                         help='add the script to the commands to be executed')
     parser.add_argument('-f', '--file', metavar='script-file', type=str, default=[], action='append',
                         help='add the contents of script-file to the commands to be executed')
-    # parser.add_argument('--follow-symlinks', action='store_true',
-    #                     help='follow symlinks when processing in place')
+    parser.add_argument('--follow-symlinks', action='store_true',
+                        help='follow symlinks when processing in place')
     parser.add_argument('-i', '--in-place', metavar='SUFFIX', nargs='?', type=str, default=None,
                         const=True,
                         help='edit files in place (makes backup if SUFFIX supplied)')
@@ -2129,6 +2133,7 @@ def main(cliargs):
         sed.unambiguous_line_len = args.line_length
         sed.separate = args.separate
         sed.sandbox_mode = args.sandbox
+        sed.follow_symlinks = args.follow_symlinks
         if args.null_data:
             sed.newline = '\0'
         else:
