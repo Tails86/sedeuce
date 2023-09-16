@@ -32,7 +32,7 @@ import shutil
 import threading
 from typing import Any, Union, List
 
-__version__ = '0.9.9'
+__version__ = '0.9.10'
 PACKAGE_NAME = 'sedeuce'
 
 VERSION_PARTS = [int(i) for i in __version__.split('.')]
