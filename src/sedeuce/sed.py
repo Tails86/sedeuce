@@ -801,7 +801,7 @@ class SubstituteCommand(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -826,11 +826,15 @@ class SubstituteCommand(SedCommand):
                 elif c == 'p':
                     command.print_matched_lines = True
                 elif c == 'w':
+                    if sandbox_mode:
+                        raise SedParsingException('e/r/w commands disabled in sandbox mode')
                     s.mark()
                     s.advance_end() # Used the rest of the characters here, including end command chars
                     file_name = s.str_from_mark().strip()
                     command.matched_file = _filename_to_writer(file_name)
                 elif c == 'e':
+                    if sandbox_mode:
+                        raise SedParsingException('e/r/w commands disabled in sandbox mode')
                     command.execute_replacement = True
                 elif c == 'i' or c == 'I':
                     command.ignore_case = True
@@ -856,7 +860,7 @@ class AppendCommand(SedCommand):
         dat.append(self._append_value)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -885,7 +889,7 @@ class BranchCommand(SedCommand):
             dat.jump_to = self._branch_name
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -917,7 +921,7 @@ class ReplaceCommand(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -947,7 +951,7 @@ class DeleteCommand(SedCommand):
         dat.jump_to = -1
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -976,7 +980,7 @@ class DeleteToNewlineCommand(SedCommand):
             dat.jump_to = -1
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1006,11 +1010,13 @@ class ExecuteCommand(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            if sandbox_mode:
+                raise SedParsingException('e/r/w commands disabled in sandbox mode')
             s.advance(1)
             s.mark()
             # Semicolons are considered part of the execute string
@@ -1031,7 +1037,7 @@ class FileCommand(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1053,7 +1059,7 @@ class SetHoldspace(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1078,7 +1084,7 @@ class AppendHoldspace(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1103,7 +1109,7 @@ class SetFromHoldspace(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1124,7 +1130,7 @@ class AppendFromHoldspace(SedCommand):
         dat.append(dat.holdspace)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1150,7 +1156,7 @@ class InsertCommand(SedCommand):
         return
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1217,7 +1223,7 @@ class UnambiguousPrint(SedCommand):
             cur_len += len(the_bytes)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1239,7 +1245,7 @@ class NextCommand(SedCommand):
             raise SedFileCompleteException()
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1261,7 +1267,7 @@ class AppendNextCommand(SedCommand):
             raise SedFileCompleteException()
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1282,7 +1288,7 @@ class PrintCommand(SedCommand):
         dat.print_bytes(dat.pattern_space)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1307,7 +1313,7 @@ class PrintToNewlineCommand(SedCommand):
             dat.print_bytes(dat.pattern_space[:loc+1])
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1330,7 +1336,7 @@ class QuitCommand(SedCommand):
         raise SedQuitException(self.exit_code)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1359,7 +1365,7 @@ class QuitWithoutPrintCommand(SedCommand):
         raise SedQuitException(self.exit_code)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1392,11 +1398,13 @@ class AppendFileContents(SedCommand):
             pass
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            if sandbox_mode:
+                raise SedParsingException('e/r/w commands disabled in sandbox mode')
             s.advance(1)
             s.advance_past()
             s.mark()
@@ -1435,11 +1443,13 @@ class AppendLineFromFile(SedCommand):
                 dat.append(next_line, add_newline=False)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            if sandbox_mode:
+                raise SedParsingException('e/r/w commands disabled in sandbox mode')
             s.advance(1)
             s.advance_past()
             s.mark()
@@ -1461,7 +1471,7 @@ class TestBranchCommand(SedCommand):
             dat.jump_to = self._branch_name
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1487,7 +1497,7 @@ class TestBranchNotCommand(SedCommand):
             dat.jump_to = self._branch_name
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1505,7 +1515,7 @@ class VersionCommand(SedCommand):
     COMMAND_CHAR = 'v'
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1541,11 +1551,13 @@ class WritePatternCommand(SedCommand):
         self._out_file.flush()
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            if sandbox_mode:
+                raise SedParsingException('e/r/w commands disabled in sandbox mode')
             s.advance(1)
             s.advance_past()
             s.mark()
@@ -1573,11 +1585,13 @@ class WritePatternToNewlineCommand(SedCommand):
         self._out_file.flush()
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
         if s.advance_past() and s[0] == __class__.COMMAND_CHAR:
+            if sandbox_mode:
+                raise SedParsingException('e/r/w commands disabled in sandbox mode')
             s.advance(1)
             s.advance_past()
             s.mark()
@@ -1602,7 +1616,7 @@ class ExchangeCommand(SedCommand):
             dat.pattern_space = dat.newline
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1633,7 +1647,7 @@ class TranslateCommand(SedCommand):
         dat.pattern_space = bytes(pattern_list)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1662,7 +1676,7 @@ class ZapCommand(SedCommand):
         dat.pattern_space = dat.newline
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1680,7 +1694,7 @@ class Comment(SedCommand):
         super().__init__(condition)
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1700,7 +1714,7 @@ class PrintLineNumberCommand(SedCommand):
         dat.insert(str(dat.line_number).encode())
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if isinstance(s, str):
             s = StringParser(s)
 
@@ -1719,7 +1733,7 @@ class Label(SedCommand):
         self.label = label
 
     @staticmethod
-    def from_string(condition:SedCondition, s):
+    def from_string(condition:SedCondition, s, sandbox_mode=False):
         if condition is not None:
             # A label cannot accept any condition
             raise SedParsingException(': doesn\'t want any addresses')
@@ -1811,7 +1825,13 @@ class SedCommandGroup(SedCommand):
                 # Let the caller handle this
                 return
 
-    def _parse_expression_lines(self, script_lines:List[StringParser], expression_number:int, recursion_idx=0):
+    def _parse_expression_lines(
+            self,
+            script_lines:List[StringParser],
+            expression_number:int,
+            sandbox_mode=False,
+            recursion_idx=0
+    ):
         for i in range(len(script_lines)):
             line = script_lines[i]
             while line.advance_past(WHITESPACE_CHARS + ';'):
@@ -1832,7 +1852,8 @@ class SedCommandGroup(SedCommand):
                             # Start a new group
                             line.advance(1)
                             command = SedCommandGroup(condition)
-                            inc = command._parse_expression_lines(script_lines[i:], expression_number, recursion_idx+1)
+                            inc = command._parse_expression_lines(
+                                script_lines[i:], expression_number, sandbox_mode, recursion_idx+1)
                             self.add_commands(command)
                             if inc is not None:
                                 i += inc
@@ -1852,7 +1873,7 @@ class SedCommandGroup(SedCommand):
                             if command_type is None:
                                 raise SedParsingException(f'Invalid command: {c}')
 
-                            command = command_type.from_string(condition, line)
+                            command = command_type.from_string(condition, line, sandbox_mode)
 
                             if line.advance_past() and line[0] not in SOMETIMES_END_CMD_CHARS:
                                 raise SedParsingException(f'extra characters after command')
@@ -1868,7 +1889,7 @@ class SedCommandGroup(SedCommand):
             i += 1
         return None
 
-    def add_expression(self, expression:str, expression_number:int):
+    def add_expression(self, expression:str, expression_number:int, sandbox_mode=False):
         # Since newline is always a command terminator, parse for that here
         script_lines = [StringParser(s) for s in expression.split(ALWAYS_END_CMD_CHAR)]
         # Save offset of each line for future logging
@@ -1888,7 +1909,7 @@ class SedCommandGroup(SedCommand):
                 script_lines[i].base_str = script_lines[i].base_str[:-1] + '\n' + script_lines[i+1].base_str
                 del script_lines[i+1]
 
-        self._parse_expression_lines(script_lines, expression_number)
+        self._parse_expression_lines(script_lines, expression_number, sandbox_mode)
 
 SED_COMMANDS = {
     SubstituteCommand.COMMAND_CHAR: SubstituteCommand,
@@ -1938,6 +1959,7 @@ class Sed:
         self.extended_regex = False
         self.unambiguous_line_len = 70
         self.separate = False
+        self.sandbox_mode = False
 
     @property
     def newline(self):
@@ -1952,7 +1974,7 @@ class Sed:
 
     def add_expression(self, script:str):
         self._expression_number += 1
-        self._commands.add_expression(script, self._expression_number)
+        self._commands.add_expression(script, self._expression_number, self.sandbox_mode)
 
     def add_command(self, command_or_commands):
         self._commands.add_commands(command_or_commands)
@@ -2059,17 +2081,19 @@ def parse_args(cliargs):
                         help='edit files in place (makes backup if SUFFIX supplied)')
     parser.add_argument('-l', '--line-length', metavar='N', type=int, default=70,
                         help='specify the desired line-wrap length for the `l\' command')
-    # parser.add_argument('--posix', action='store_true', help='disable all GNU extensions.')
+    # This option currently has no effect
+    parser.add_argument('--posix', action='store_true', help='disable all extensions.')
     parser.add_argument('-E', '-r', '--regexp-extended', action='store_true',
                         help='use extended regular expressions in the script')
     parser.add_argument('-s', '--separate', action='store_true',
                         help='consider files as separate rather than as a single, '
                         'continuous long stream.')
-    # parser.add_argument('--sandbox', action='store_true',
-    #                     help='operate in sandbox mode (disable e/r/w commands).')
-    # parser.add_argument('-u', '--unbuffered', action='store_true',
-    #                     help='load minimal amounts of data from the input files and flush '
-    #                     'the output buffers more often')
+    parser.add_argument('--sandbox', action='store_true',
+                        help='operate in sandbox mode (disable e/r/w commands).')
+    # This is just done by default - here for compatibility only
+    parser.add_argument('-u', '--unbuffered', action='store_true',
+                        help='load minimal amounts of data from the input files and flush '
+                        'the output buffers more often')
     # parser.add_argument('-z', '--null-data', action='store_true',
     #                     help='separate lines by NUL characters')
     parser.add_argument('--version', action='store_true',
@@ -2097,6 +2121,11 @@ def main(cliargs):
     sed = Sed()
 
     try:
+        sed.suppress_pattern_print = args.quiet
+        sed.extended_regex = args.regexp_extended
+        sed.unambiguous_line_len = args.line_length
+        sed.separate = args.separate
+        sed.sandbox_mode = args.sandbox
         if args.script:
             sed.add_expression(args.script)
         for expression in args.expression:
@@ -2104,10 +2133,6 @@ def main(cliargs):
         for file in args.file:
             with open(file, 'r') as fp:
                 sed.add_expression(fp.read())
-        sed.suppress_pattern_print = args.quiet
-        sed.extended_regex = args.regexp_extended
-        sed.unambiguous_line_len = args.line_length
-        sed.separate = args.separate
         if args.input_file:
             sed.add_file(args.input_file)
         if args.in_place is not None:

@@ -1013,6 +1013,69 @@ class CliTests(unittest.TestCase):
             ''
         ])
 
+    def test_sandbox_option_no_write_pattern(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()),\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['w nowrite.txt', 'file1.txt', '--sandbox'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 1: e/r/w commands disabled in sandbox mode\n')
+
+    def test_sandbox_option_no_write_pattern_to_newline(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()),\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['W nowrite.txt', 'file1.txt', '--sandbox'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 1: e/r/w commands disabled in sandbox mode\n')
+
+    def test_sandbox_option_no_read_pattern(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()),\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['r nowrite.txt', 'file1.txt', '--sandbox'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 1: e/r/w commands disabled in sandbox mode\n')
+
+    def test_sandbox_option_no_read_pattern_to_newline(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()),\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['R nowrite.txt', 'file1.txt', '--sandbox'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 1: e/r/w commands disabled in sandbox mode\n')
+
+    def test_sandbox_option_no_execute(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()),\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['e echo hello', 'file1.txt', '--sandbox'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 1: e/r/w commands disabled in sandbox mode\n')
+
+    def test_sandbox_option_no_substitute_write(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()),\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['s/blah/blah/w nowrite.txt', 'file1.txt', '--sandbox'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 14: e/r/w commands disabled in sandbox mode\n')
+
+    def test_sandbox_option_no_substitute_execute(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()),\
+            patch('sedeuce.sed.sys.stderr', new = StringIO()) as fake_err \
+        :
+            # Invalid file should be completely ignored
+            sed.main(['s/blah/blah/e echo hello', 'file1.txt', '--sandbox'])
+            err_dat = fake_err.getvalue()
+        self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 14: e/r/w commands disabled in sandbox mode\n')
+
 
 if __name__ == '__main__':
     unittest.main()
