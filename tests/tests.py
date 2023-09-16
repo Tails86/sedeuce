@@ -962,6 +962,18 @@ class CliTests(unittest.TestCase):
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(in_lines[:2], ['blah blah hi', 'blah blah hi'])
 
+    def test_extended_regex(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+        :
+            sed.main(['s=.*;([0-9]{3})([0-9]+)=I got your number: \\1-\\2 (I got it)=', '-E'])
+
+            out_lines = test_file1.split('\n')
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+
+        self.assertEqual(len(in_lines), len(out_lines))
+        self.assertEqual(in_lines[9], 'I got your number: 867-5309 (I got it)')
+
 
 
 if __name__ == '__main__':

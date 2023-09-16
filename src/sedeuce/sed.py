@@ -65,13 +65,21 @@ class SedFileCompleteException(Exception):
         super().__init__(*args)
 
 def _pattern_escape_invert(pattern, chars):
+    if isinstance(pattern, bytes):
+        if isinstance(chars, str):
+            chars = chars.encode()
+        escape = b'\\'
+    else:
+        if isinstance(chars, bytes):
+            chars = chars.decode()
+        escape = '\\'
+
     for char in chars:
-        escaped_char = '\\' + char
-        pattern_split = pattern.split(escaped_char)
-        new_pattern_split = []
-        for piece in pattern_split:
-            new_pattern_split.append(piece.replace(char, escaped_char))
-        pattern = char.join(new_pattern_split)
+        if isinstance(char, int):
+            # convert the char back to bytes
+            char = char.to_bytes(1, byteorder='little')
+        escaped_char = escape + char
+        pattern = char.join([piece.replace(char, escaped_char) for piece in pattern.split(escaped_char)])
     return pattern
 
 class StringParser:
@@ -450,6 +458,7 @@ class WorkingData:
         self.append_space = None
         self.jump_to = None # should be None, 0, -1, or string
         self.holdspace = b''
+        self.extended_regex = False
 
     def set_in_file(self, file:FileIterable):
         self.file_modified = False
@@ -621,11 +630,15 @@ class RangeSedCondition(SedCondition):
 class RegexSedCondition(SedCondition):
     def __init__(self, pattern) -> None:
         super().__init__()
-        self._pattern = _pattern_escape_invert(pattern, '+?|{}()')
+        self._pattern = pattern
         if isinstance(self._pattern, str):
             self._pattern = self._pattern.encode()
+        self._extended_regex = True
 
     def is_match(self, dat:WorkingData) -> bool:
+        if dat.extended_regex != self._extended_regex:
+            self._pattern = _pattern_escape_invert(self._pattern, '+?|{}()')
+            self._extended_regex = not self._extended_regex
         return (re.search(self._pattern, dat.pattern_space) is not None)
 
     @staticmethod
@@ -662,7 +675,7 @@ class SubstituteCommand(SedCommand):
 
     def __init__(self, condition:SedCondition, find_pattern, replace_pattern):
         super().__init__(condition)
-        find_pattern = _pattern_escape_invert(find_pattern, '+?|{}()')
+        find_pattern = find_pattern
         if isinstance(find_pattern, str):
             find_pattern = find_pattern.encode()
         # TODO: The $ character should correspond to newline character
@@ -681,6 +694,7 @@ class SubstituteCommand(SedCommand):
         self._ignore_case = False
         # This gives a bit different implementation within re
         self._multiline_mode = False
+        self._extended_regex = True
 
         self._compile_find()
 
@@ -720,6 +734,10 @@ class SubstituteCommand(SedCommand):
             self.matched_file.flush()
 
     def _handle(self, dat:WorkingData) -> None:
+        if dat.extended_regex != self._extended_regex:
+            self._find_bytes = _pattern_escape_invert(self._find_bytes, '+?|{}()')
+            self._compile_find()
+            self._extended_regex = not self._extended_regex
         # Determine what nth match is based on self data
         nth_match = self.nth_match
         if self._only_first_match:
@@ -1895,6 +1913,7 @@ class Sed:
         self.in_place_backup_suffix = None
         self.newline = '\n'
         self.suppress_pattern_print = False
+        self.extended_regex = False
 
     @property
     def newline(self):
@@ -1937,6 +1956,7 @@ class Sed:
 
         dat = WorkingData()
         dat.suppress_pattern_print = self.suppress_pattern_print
+        dat.extended_regex = self.extended_regex
         dat.newline = self.newline
         for file in files:
             dat.set_in_file(file)
@@ -2014,8 +2034,8 @@ def parse_args(cliargs):
     # parser.add_argument('-l', '--line-length', metavar='N', type=int, default=None,
     #                     help='specify the desired line-wrap length for the `l\' command')
     # parser.add_argument('--posix', action='store_true', help='disable all GNU extensions.')
-    # parser.add_argument('-E', '-r', '--regexp-extended', action='store_true',
-    #                     help='use extended regular expressions in the script')
+    parser.add_argument('-E', '-r', '--regexp-extended', action='store_true',
+                        help='use extended regular expressions in the script')
     # parser.add_argument('-s', '--separate', action='store_true',
     #                     help='consider files as separate rather than as a single, '
     #                     'continuous long stream.')
@@ -2059,6 +2079,7 @@ def main(cliargs):
             with open(file, 'r') as fp:
                 sed.add_expression(fp.read())
         sed.suppress_pattern_print = args.quiet
+        sed.extended_regex = args.regexp_extended
         if args.input_file:
             sed.add_file(args.input_file)
         if args.in_place is not None:
