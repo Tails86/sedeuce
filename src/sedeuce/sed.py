@@ -32,7 +32,7 @@ import shutil
 import threading
 from typing import Any, Union, List
 
-__version__ = '0.1.1'
+__version__ = '0.9.9'
 PACKAGE_NAME = 'sedeuce'
 
 VERSION_PARTS = [int(i) for i in __version__.split('.')]
@@ -2114,7 +2114,7 @@ def parse_args(cliargs):
         if args.script is not None:
             args.input_file.insert(0, args.script)
             args.script = None
-    elif args.script is None:
+    elif args.script is None and not args.version:
         parser.print_help()
         sys.exit(1)
 
