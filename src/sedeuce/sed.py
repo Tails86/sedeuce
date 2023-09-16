@@ -459,6 +459,7 @@ class WorkingData:
         self.jump_to = None # should be None, 0, -1, or string
         self.holdspace = b''
         self.extended_regex = False
+        self.unambiguous_line_len = 70
 
     def set_in_file(self, file:FileIterable):
         self.file_modified = False
@@ -678,7 +679,8 @@ class SubstituteCommand(SedCommand):
         find_pattern = find_pattern
         if isinstance(find_pattern, str):
             find_pattern = find_pattern.encode()
-        # TODO: The $ character should correspond to newline character
+        # TODO: The $ character should correspond to only the end of the pattern space,
+        #       even if multiple newlines are included
         self._find_bytes = find_pattern
         self._only_first_match = self._find_bytes.startswith(b'^')
         # TODO: implement special sequences using replace callback instead?
@@ -1180,7 +1182,7 @@ class UnambiguousPrint(SedCommand):
     @staticmethod
     def _convert_byte(b:int, newline_char:bytes):
         if b == ord(newline_char):
-            return [ord('$'), b]
+            return [b]
         elif b in __class__.CONVERSION_DICT:
             return __class__.CONVERSION_DICT[b]
         elif b < 32 or b > 126:
@@ -1189,11 +1191,27 @@ class UnambiguousPrint(SedCommand):
             return [b]
 
     def _handle(self, dat:WorkingData) -> None:
-        the_bytes = bytes([b for a in dat.pattern_space for b in __class__._convert_byte(a, dat.newline)])
-        # Need to add $ if the current line does not end with newline
-        if not dat.pattern_space.endswith(dat.newline):
-            the_bytes += b'$'
-        dat.print_bytes(the_bytes)
+        mod_pattern = dat.pattern_space
+        if mod_pattern.endswith(dat.newline):
+            mod_pattern = mod_pattern[:-1] + b'$' + dat.newline
+        else:
+            mod_pattern += b'$'
+
+        the_bytes = None
+        cur_len = 0
+
+        for i, b in enumerate(mod_pattern):
+            the_bytes = __class__._convert_byte(b, dat.newline)
+            if cur_len > 0 and dat.unambiguous_line_len > 0:
+                if (
+                    cur_len + len(the_bytes) > dat.unambiguous_line_len
+                    or ((cur_len + len(the_bytes)) == dat.unambiguous_line_len
+                        and i != (len(mod_pattern) - 1))
+                ):
+                    dat.print_bytes(b'\\' + dat.newline)
+                    cur_len = 0
+            dat.print_bytes(bytes(the_bytes))
+            cur_len += len(the_bytes)
 
     @staticmethod
     def from_string(condition:SedCondition, s):
@@ -1856,6 +1874,7 @@ class SedCommandGroup(SedCommand):
             line.char_offset = char_offset
             char_offset += len(line.base_str)
 
+        # TODO: most commands don't honor escaped newline
         # Iterate in reverse, 1 from end so that we can glue the "next" one if escaped char found
         for i in range(len(script_lines)-2, -1, -1):
             # If there are an odd number of slashes at the end of the string,
@@ -1914,6 +1933,7 @@ class Sed:
         self.newline = '\n'
         self.suppress_pattern_print = False
         self.extended_regex = False
+        self.unambiguous_line_len = 70
 
     @property
     def newline(self):
@@ -1957,6 +1977,7 @@ class Sed:
         dat = WorkingData()
         dat.suppress_pattern_print = self.suppress_pattern_print
         dat.extended_regex = self.extended_regex
+        dat.unambiguous_line_len = self.unambiguous_line_len
         dat.newline = self.newline
         for file in files:
             dat.set_in_file(file)
@@ -2031,8 +2052,8 @@ def parse_args(cliargs):
     parser.add_argument('-i', '--in-place', metavar='SUFFIX', nargs='?', type=str, default=None,
                         const=True,
                         help='edit files in place (makes backup if SUFFIX supplied)')
-    # parser.add_argument('-l', '--line-length', metavar='N', type=int, default=None,
-    #                     help='specify the desired line-wrap length for the `l\' command')
+    parser.add_argument('-l', '--line-length', metavar='N', type=int, default=70,
+                        help='specify the desired line-wrap length for the `l\' command')
     # parser.add_argument('--posix', action='store_true', help='disable all GNU extensions.')
     parser.add_argument('-E', '-r', '--regexp-extended', action='store_true',
                         help='use extended regular expressions in the script')
@@ -2080,6 +2101,7 @@ def main(cliargs):
                 sed.add_expression(fp.read())
         sed.suppress_pattern_print = args.quiet
         sed.extended_regex = args.regexp_extended
+        sed.unambiguous_line_len = args.line_length
         if args.input_file:
             sed.add_file(args.input_file)
         if args.in_place is not None:
