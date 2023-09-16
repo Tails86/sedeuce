@@ -888,17 +888,20 @@ class CliTests(unittest.TestCase):
 
     def test_bracketed_expression(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
-            sed.main(['s/i/o/; 3,5{s/i/u/i;a hello\n/u am/{i woop\ns/usong/god/}}', 'file1.txt'])
+            sed.main([
+                's/i/o/; 3,5{s/o/u/g;a hello\n/I am/{i whoop\ns/usung/great/;y/I/U/;s/am am am/are/}}',
+                'file1.txt'
+            ])
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(in_lines, [
             'thos is a file',
             'whoch contains several lines,',
-            'woop',
-            'and u am am am god',
+            'whoop',
+            'and U are great',
             'hello',
-            'ot to test',
+            'ut tu test',
             'hello',
-            'sed for a whole',
+            'sed fur a whule',
             'hello',
             '',
             'here os some junk text',
@@ -908,6 +911,58 @@ class CliTests(unittest.TestCase):
             ';ajsdfj sdljf ajsdfj;sdljf',
             'ajsdfja;sjdf ;sdajf ;l'
         ])
+
+    def test_quiet(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main([
+                's/i/o/; 3,5ihello\n4,6aworld',
+                'file1.txt',
+                '-n'
+            ])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        # Yep, this is expected
+        self.assertEqual(in_lines, ['hello', 'hello', 'world', 'hello', 'world', 'world', ''])
+
+    def test_expression_option(self):
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main([
+                'file1.txt',
+                '-e', 'a world',
+                '--expression', 'y/abc/xyz/',
+                '--expression=i hello'
+            ])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:14], [
+            'hello',
+            'this is x file',
+            'world',
+            'hello',
+            'whizh zontxins severxl lines,',
+            'world',
+            'hello',
+            'xnd I xm xm xm using',
+            'world',
+            'hello',
+            'it to test',
+            'world',
+            'hello',
+            'sed for x while'
+        ])
+
+    def test_expressions_from_file(self):
+        tmp_file = tempfile.NamedTemporaryFile('w')
+        tmp_file.write('c blah hi\ns/blah/blah blah/;')
+        tmp_file.flush()
+        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+            sed.main([
+                '-f', tmp_file.name,
+                '--',
+                'file1.txt'
+            ])
+            in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        self.assertEqual(in_lines[:2], ['blah blah hi', 'blah blah hi'])
+
+
 
 if __name__ == '__main__':
     unittest.main()

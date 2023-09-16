@@ -437,6 +437,7 @@ def _dual_field_command_parse(s):
 
 class WorkingData:
     def __init__(self) -> None:
+        self.suppress_pattern_print = False
         self.newline = b'\n'
         self.in_file = None
         self.in_file_iter = None
@@ -559,8 +560,11 @@ class WorkingData:
         self._flush_insert_data()
 
         if self._pattern_space is not None:
-            # Write the modified pattern space
-            self._write(self.pattern_space)
+            if not self.suppress_pattern_print:
+                # Write the modified pattern space
+                self._write(self.pattern_space)
+            else:
+                self.file_modified = True
             self._pattern_space = None
             self.pattern_modified = False
 
@@ -1890,6 +1894,7 @@ class Sed:
         self.in_place = False
         self.in_place_backup_suffix = None
         self.newline = '\n'
+        self.suppress_pattern_print = False
 
     @property
     def newline(self):
@@ -1931,6 +1936,7 @@ class Sed:
             files = [AutoInputFileIterable(f, newline_str=self.newline) for f in self._files]
 
         dat = WorkingData()
+        dat.suppress_pattern_print = self.suppress_pattern_print
         dat.newline = self.newline
         for file in files:
             dat.set_in_file(file)
@@ -1985,22 +1991,21 @@ class Sed:
 def parse_args(cliargs):
     parser = argparse.ArgumentParser(
         prog=PACKAGE_NAME,
-        description='A sed clone in Python with both CLI and library interfaces',
-        epilog='NOTE: Only substitute command is currently available'
+        description='A sed clone in Python with both CLI and library interfaces'
     )
 
-    parser.add_argument('script', type=str, nargs='?',
+    parser.add_argument('script', type=str, nargs='?', default=None,
                         help='script, only if no other script defined below')
     parser.add_argument('input_file', metavar='input-file', type=str, nargs='*', default=[],
                         help='Input file(s) to parse')
 
-    # parser.add_argument('-n', '--quiet', '--silent', action='store_true',
-    #                     help='suppress automatic printing of pattern space')
+    parser.add_argument('-n', '--quiet', '--silent', dest='quiet', action='store_true',
+                        help='suppress automatic printing of pattern space')
     # parser.add_argument('--debug', action='store_true', help='annotate program execution')
-    # parser.add_argument('-e', '--expression', metavar='script', type=str, default=None,
-    #                     help='add the contents of script-file to the commands to be executed')
-    # parser.add_argument('-f', '--file', metavar='script-file', type=str, default=None,
-    #                     help='add the contents of script-file to the commands to be executed')
+    parser.add_argument('-e', '--expression', metavar='script', type=str, default=[], action='append',
+                        help='add the script to the commands to be executed')
+    parser.add_argument('-f', '--file', metavar='script-file', type=str, default=[], action='append',
+                        help='add the contents of script-file to the commands to be executed')
     # parser.add_argument('--follow-symlinks', action='store_true',
     #                     help='follow symlinks when processing in place')
     parser.add_argument('-i', '--in-place', metavar='SUFFIX', nargs='?', type=str, default=None,
@@ -2025,6 +2030,16 @@ def parse_args(cliargs):
                         help='output version information and exit')
     parser.add_argument('--verbose', action='store_true', help='show verbose errors')
     args = parser.parse_args(cliargs)
+
+    if args.expression or args.file:
+        # The first positional is instead an input file
+        if args.script is not None:
+            args.input_file.insert(0, args.script)
+            args.script = None
+    elif not args.script:
+        parser.print_help()
+        sys.exit(1)
+
     return args
 
 def main(cliargs):
@@ -2032,12 +2047,18 @@ def main(cliargs):
     if args.version:
         print('{} {}'.format(PACKAGE_NAME, __version__))
         return 0
-    if not args.script:
-        print('No script provided')
-        return 1
+
     sed = Sed()
+
     try:
-        sed.add_expression(args.script)
+        if args.script:
+            sed.add_expression(args.script)
+        for expression in args.expression:
+            sed.add_expression(expression)
+        for file in args.file:
+            with open(file, 'r') as fp:
+                sed.add_expression(fp.read())
+        sed.suppress_pattern_print = args.quiet
         if args.input_file:
             sed.add_file(args.input_file)
         if args.in_place is not None:
