@@ -4,12 +4,28 @@ A seductive sed clone in Python with both CLI and library interfaces
 
 ## Known Differences with sed
 
+- The Python module `re` is internally used for all regular expressions. The inputted regular
+    expression is modified only when basic regular expressions are used in order to reverse meaning
+    of for escaped characters `+?|{}()`
 - Substitute
-    - The Python module re is internally used for all regular expressions. The inputted regular
-    expression is modified only when basic regular expressions are used.
     - The m/M modifier will act differently due to how Python re handles multiline mode
     - GNU sed extension special sequences not supported
+    - All `\n` characters match with $ (end of line) due to use of Python `re`
 - Newline can always be escaped with \ in any command
+
+## Contribution
+
+Feel free to open a bug report or make a merge request on [github](https://github.com/Tails86/sedeuce/issues).
+
+## Installation
+This project is uploaded to PyPI at https://pypi.org/project/sedeuce/
+
+To install, ensure you are connected to the internet and execute: `python3 -m pip install sedeuce --upgrade`
+
+Once installed, there will be a script called `sedeuce` under Python's script directory. If `sed`
+is not found on the system, then a script called `sed` will also be installed. Ensure Python's
+scripts directory is under the environment variable `PATH` in order to be able to execute the script
+properly from command line.
 
 ## CLI Help
 
