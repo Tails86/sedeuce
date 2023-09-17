@@ -140,6 +140,8 @@ class SubstituteCommand(SedCommand):
                     proc_output = subprocess.run(
                         new_str.decode(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     new_dat = proc_output.stdout.replace(b'\r\n', dat.newline).replace(b'\n', dat.newline)
+                    if new_dat.endswith(dat.newline):
+                        new_dat = new_dat[:-len(dat.newline)]
                 else:
                     new_dat = new_str
                 dat.pattern_space = dat.pattern_space[0:start] + new_dat + dat.pattern_space[end:]

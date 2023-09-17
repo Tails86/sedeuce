@@ -227,8 +227,7 @@ class CliTests(unittest.TestCase):
 
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
 
-        self.assertEqual(len(in_lines), 3)
-        self.assertEqual(in_lines[1], '9876 903')
+        self.assertEqual(in_lines, ['xyz', '9876 903', 'abcd'])
 
     def test_substitute_ignore_case(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
