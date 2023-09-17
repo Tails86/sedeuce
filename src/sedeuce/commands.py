@@ -368,11 +368,13 @@ class ExecuteCommand(SedCommand):
     def _handle(self, dat:WorkingData) -> None:
         if self.cmd:
             # Execute the command
-            proc_output = subprocess.run(self.cmd, shell=True, capture_output=True)
+            proc_output = subprocess.run(
+                self.cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             dat.pattern_space = proc_output.stdout + dat.pattern_space
         else:
             # Execute what's in the pattern space and replace the pattern space with the output
-            proc_output = subprocess.run(dat.pattern_space.decode(), shell=True, capture_output=True)
+            proc_output = subprocess.run(
+                dat.pattern_space.decode(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             dat.pattern_space = proc_output.stdout
         return
 
