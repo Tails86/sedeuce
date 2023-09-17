@@ -139,11 +139,7 @@ class SubstituteCommand(SedCommand):
                     # Execute the replacement
                     proc_output = subprocess.run(
                         new_str.decode(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    new_dat = proc_output.stdout
-                    if new_dat.endswith(b'\n'):
-                        new_dat = new_dat[:-1]
-                    if new_dat.endswith(b'\r'):
-                        new_dat = new_dat[:-1]
+                    new_dat = proc_output.stdout.replace(b'\r\n', dat.newline).replace(b'\n', dat.newline)
                 else:
                     new_dat = new_str
                 dat.pattern_space = dat.pattern_space[0:start] + new_dat + dat.pattern_space[end:]
@@ -370,12 +366,13 @@ class ExecuteCommand(SedCommand):
             # Execute the command
             proc_output = subprocess.run(
                 self.cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            dat.pattern_space = proc_output.stdout + dat.pattern_space
+            new_data = proc_output.stdout.replace(b'\r\n', dat.newline).replace(b'\n', dat.newline)
+            dat.pattern_space = new_data + dat.pattern_space
         else:
             # Execute what's in the pattern space and replace the pattern space with the output
             proc_output = subprocess.run(
                 dat.pattern_space.decode(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            dat.pattern_space = proc_output.stdout
+            dat.pattern_space = proc_output.stdout.replace(b'\r\n', dat.newline).replace(b'\n', dat.newline)
         return
 
     @staticmethod

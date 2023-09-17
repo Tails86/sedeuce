@@ -26,9 +26,9 @@ from .commands import *
 import os
 import sys
 import argparse
-import tempfile
 import shutil
 import glob
+from io import BytesIO
 from typing import Any, Union, List, BinaryIO
 from .utils import __version__, PACKAGE_NAME, IS_WINDOWS
 
@@ -119,7 +119,7 @@ class Sed:
 
             if self.in_place and not isinstance(file, StdinIterable):
                 # Write to temporary file to be copied to target when it changes
-                tmp_file = tempfile.NamedTemporaryFile(mode='wb')
+                tmp_file = BytesIO()
                 dat.out_file = tmp_file
             else:
                 tmp_file = None
@@ -162,9 +162,8 @@ class Sed:
                 if self.in_place_backup_suffix is not None:
                     backup_name = file_name + self.in_place_backup_suffix
                     shutil.copy2(file_name, backup_name)
-                os.remove(file_name)
-                shutil.copy2(tmp_file.name, file_name)
-                del tmp_file
+                with open(file_name, 'wb') as fp:
+                    fp.write(tmp_file.getvalue())
         return 0
 
 def parse_args(cliargs:List[str]):

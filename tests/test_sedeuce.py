@@ -28,6 +28,9 @@ fasjd f ;8675309
 ;ajsdfj sdljf ajsdfj;sdljf
 ajsdfja;sjdf ;sdajf ;l'''
 
+def _is_windows():
+    return sys.platform.lower().startswith('win')
+
 class FakeStdOut:
     def __init__(self) -> None:
         self.buffer = BytesIO()
@@ -199,18 +202,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(in_lines[3], 'and I sam; am am using')
 
     def test_substitute_write_file(self):
-        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
-            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
-        :
-            # TODO: This may be problematic if trying to execute in Windows? - test that
-            tmp = tempfile.NamedTemporaryFile('r')
-            sed.main([f'3s/am/sam;/w {tmp.name}'])
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            file_path = os.path.join(tmp_dir.name, 'file.txt')
+            with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+                patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+            :
+                sed.main([f'3s/am/sam;/w {file_path}'])
 
-            in_tmp = list(tmp.readlines())
+            with open(file_path, 'r') as fp:
+                in_tmp = list(fp.readlines())
+            self.assertEqual(len(in_tmp), 1)
+            self.assertEqual(in_tmp[0], 'and I sam; am am using\n')
+        finally:
+            tmp_dir.cleanup()
 
-        self.assertEqual(len(in_tmp), 1)
-        self.assertEqual(in_tmp[0], 'and I sam; am am using\n')
-
+    @unittest.skipIf(_is_windows(), "can't execute multiplication from default command line in Windows")
     def test_substitute_number_plus_execute(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
             patch('sedeuce.sed.sys.stdin', FakeStdIn('xyz\n9876 1234\nabcd')) \
@@ -335,7 +342,7 @@ class CliTests(unittest.TestCase):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
             patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
         :
-            sed.main(['1,3eecho hello;echo world'])
+            sed.main(['1,3eecho hello&&echo world'])
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
         self.assertEqual(in_lines[:10], [
             'hello',
@@ -723,32 +730,38 @@ class CliTests(unittest.TestCase):
         self.assertEqual(err_dat, 'sedeuce: Error at expression #1, char 9: expected newer version of sedeuce\n')
 
     def test_write(self):
-        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
-            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
-        :
-            # TODO: This may be problematic if trying to execute in Windows? - test that
-            tmp = tempfile.NamedTemporaryFile('r')
-            sed.main([f'3,5w {tmp.name}'])
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            file_path = os.path.join(tmp_dir.name, 'file.txt')
+            with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+                patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+            :
+                sed.main([f'3,5w {file_path}'])
 
-            in_tmp = list(tmp.readlines())
-
-        self.assertEqual(in_tmp, [
-            'and I am am am using\n',
-            'it to test\n',
-            'sed for a while\n'
-        ])
+            with open(file_path, 'r') as fp:
+                in_tmp = list(fp.readlines())
+            self.assertEqual(in_tmp, [
+                'and I am am am using\n',
+                'it to test\n',
+                'sed for a while\n'
+            ])
+        finally:
+            tmp_dir.cleanup()
 
     def test_write_up_to_newline(self):
-        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
-            patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
-        :
-            # TODO: This may be problematic if trying to execute in Windows? - test that
-            tmp = tempfile.NamedTemporaryFile('r')
-            sed.main([f'3h;4G;4W {tmp.name}'])
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            file_path = os.path.join(tmp_dir.name, 'file.txt')
+            with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
+                patch('sedeuce.sed.sys.stdin', FakeStdIn(test_file1)) \
+            :
+                sed.main([f'3h;4G;4W {file_path}'])
 
-            in_tmp = list(tmp.readlines())
-
-        self.assertEqual(in_tmp, ['it to test\n'])
+            with open(file_path, 'r') as fp:
+                in_tmp = list(fp.readlines())
+            self.assertEqual(in_tmp, ['it to test\n'])
+        finally:
+            tmp_dir.cleanup()
 
     def test_translate(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
@@ -950,17 +963,22 @@ class CliTests(unittest.TestCase):
         ])
 
     def test_expressions_from_file(self):
-        tmp_file = tempfile.NamedTemporaryFile('w')
-        tmp_file.write('c blah hi\ns/blah/blah blah/;')
-        tmp_file.flush()
-        with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
-            sed.main([
-                '-f', tmp_file.name,
-                '--',
-                'file1.txt'
-            ])
-            in_lines = fake_out.buffer.getvalue().decode().split('\n')
-        self.assertEqual(in_lines[:2], ['blah blah hi', 'blah blah hi'])
+        tmp_dir = tempfile.TemporaryDirectory()
+        try:
+            file_path = os.path.join(tmp_dir.name, 'file.txt')
+            with open(file_path, 'w') as tmp_file:
+                tmp_file.write('c blah hi\ns/blah/blah blah/;')
+                tmp_file.flush()
+            with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out:
+                sed.main([
+                    '-f', file_path,
+                    '--',
+                    'file1.txt'
+                ])
+                in_lines = fake_out.buffer.getvalue().decode().split('\n')
+            self.assertEqual(in_lines[:2], ['blah blah hi', 'blah blah hi'])
+        finally:
+            tmp_dir.cleanup()
 
     def test_extended_regex(self):
         with patch('sedeuce.sed.sys.stdout', new = FakeStdOut()) as fake_out, \
