@@ -137,7 +137,8 @@ class SubstituteCommand(SedCommand):
                 new_str = re.sub(self._find, self._replace, match.group(0))
                 if self.execute_replacement:
                     # Execute the replacement
-                    proc_output = subprocess.run(new_str.decode(), shell=True, capture_output=True)
+                    proc_output = subprocess.run(
+                        new_str.decode(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     new_dat = proc_output.stdout
                     if new_dat.endswith(b'\n'):
                         new_dat = new_dat[:-1]
