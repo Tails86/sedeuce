@@ -30,7 +30,7 @@ import tempfile
 import shutil
 import glob
 from typing import Any, Union, List, BinaryIO
-from .utils import __version__, PACKAGE_NAME
+from .utils import __version__, PACKAGE_NAME, IS_WINDOWS
 
 class Sed:
     def __init__(self):
