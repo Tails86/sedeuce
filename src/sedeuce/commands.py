@@ -40,6 +40,16 @@ class SedCommand:
     def _handle(self, dat:WorkingData) -> None:
         pass
 
+def _run_command(cmd):
+    proc_output = subprocess.run(
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out_dat = proc_output.stdout
+    if out_dat.endswith(b'\n'):
+        out_dat = out_dat[:-1]
+    if out_dat.endswith(b'\r'):
+        out_dat = out_dat[:-1]
+    return out_dat
+
 class SubstituteCommand(SedCommand):
     COMMAND_CHAR = 's'
 
@@ -137,14 +147,7 @@ class SubstituteCommand(SedCommand):
                 new_str = re.sub(self._find, self._replace, match.group(0))
                 if self.execute_replacement:
                     # Execute the replacement
-                    proc_output = subprocess.run(
-                        new_str.decode(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    new_dat = proc_output.stdout
-                    if new_dat.endswith(b'\n'):
-                        new_dat = new_dat[:-1]
-                    if new_dat.endswith(b'\r'):
-                        new_dat = new_dat[:-1]
-                    new_dat = new_dat.replace(b'\r\n', dat.newline).replace(b'\n', dat.newline)
+                    new_dat = _run_command(new_str.decode())
                 else:
                     new_dat = new_str
                 dat.pattern_space = dat.pattern_space[0:start] + new_dat + dat.pattern_space[end:]
@@ -369,15 +372,10 @@ class ExecuteCommand(SedCommand):
     def _handle(self, dat:WorkingData) -> None:
         if self.cmd:
             # Execute the command
-            proc_output = subprocess.run(
-                self.cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            new_data = proc_output.stdout.replace(b'\r\n', dat.newline).replace(b'\n', dat.newline)
-            dat.pattern_space = new_data + dat.pattern_space
+            dat.pattern_space = _run_command(self.cmd) + dat.newline + dat.pattern_space
         else:
             # Execute what's in the pattern space and replace the pattern space with the output
-            proc_output = subprocess.run(
-                dat.pattern_space.decode(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            dat.pattern_space = proc_output.stdout.replace(b'\r\n', dat.newline).replace(b'\n', dat.newline)
+            dat.pattern_space = _run_command(dat.pattern_space.decode()) + dat.newline
         return
 
     @staticmethod

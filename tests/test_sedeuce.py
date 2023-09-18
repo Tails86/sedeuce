@@ -343,6 +343,11 @@ class CliTests(unittest.TestCase):
         :
             sed.main(['1,3eecho hello&&echo world'])
             in_lines = fake_out.buffer.getvalue().decode().split('\n')
+        if _is_windows():
+            # Remove \r characters
+            for i in range(len(in_lines)):
+                if in_lines[i].endswith('\r'):
+                    in_lines[i] = in_lines[i][:-1]
         self.assertEqual(in_lines[:10], [
             'hello',
             'world',
