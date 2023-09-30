@@ -2,11 +2,17 @@
 
 A seductive sed clone in Python with both CLI and library interfaces
 
+## Shameless Promotion
+
+Check out my other Python clone tools:
+- [greplica](https://pypi.org/project/greplica/)
+- [refind](https://pypi.org/project/refind/)
+
 ## Known Differences with sed
 
 - The Python module `re` is internally used for all regular expressions. The inputted regular
     expression is modified only when basic regular expressions are used in order to reverse meaning
-    of for escaped characters `+?|{}()`
+    of escaped characters `+?|{}()`
 - Substitute
     - The m/M modifier will act differently due to how Python re handles multiline mode
     - GNU sed extension special sequences not supported
