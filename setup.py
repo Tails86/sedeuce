@@ -42,7 +42,7 @@ setuptools.setup(
     name='sedeuce',
     author='James Smith',
     author_email='jmsmith86@gmail.com',
-    description='A sed clone in Python with both CLI and library interfaces',
+    description='A seductive sed clone in Python with both CLI and library interfaces',
     keywords='sed, files, regex, replace',
     long_description=long_description,
     long_description_content_type='text/markdown',
