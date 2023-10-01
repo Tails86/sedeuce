@@ -32,5 +32,6 @@ def main():
         print('')
         return 0
 
-# Execute above
-sys.exit(main())
+if __name__ == '__main__':
+    # Execute above
+    sys.exit(main())
