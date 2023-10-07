@@ -25,7 +25,7 @@ import sys
 import threading
 from typing import Any, Union, List
 
-__version__ = '1.0.7'
+__version__ = '1.0.8'
 PACKAGE_NAME = 'sedeuce'
 
 VERSION_PARTS = [int(i) for i in __version__.split('.')]
